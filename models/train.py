@@ -8,7 +8,7 @@ import os
 import time
 from torch.utils.data import Dataset, DataLoader
 from load_datas import TF, trainDataset, collate_fn
-from Yolov3m import Yolov3
+from Yolov3 import Yolov3
 import torch.optim as optim
 import datetime
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
@@ -34,7 +34,8 @@ def trainer():
     trainpath = r'C:\Users\10696\Desktop\yolov3\datas\VOC2007\train.txt'
     traindata = trainDataset(trainpath, transform=TF)
     testdata = r'C:\Users\10696\Desktop\yolov3\datas\VOC2007\test.txt'
-    pretrainedmodel = r'C:\Users\10696\Desktop\yolov3\log\model_137_359000_0.001_2021-09-03_13-18-38.pth'
+    pretrainedmodel = r'C:\Users\10696\Desktop\yolov3\log\model_337_881000_0.001_2021-09-03_20-36-52.pth'
+    scratch = True
     tim = datetime.datetime.strftime(datetime.datetime.now(),"%Y-%m-%d %H-%M-%S").replace(' ', '_')
     logfile = r'log\log_%s.txt'%tim
     flogs = open(logfile, 'w')
@@ -63,11 +64,17 @@ def trainer():
         else:
             state_dict = torch.load(pretrainedmodel, map_location='cpu')
         model.load_state_dict(state_dict['state_dict'])
-        iteration = state_dict['iteration']
-        alliters = state_dict['alliters']
-        nowepoch = state_dict['nowepoch']
+        if not scratch:
+            iteration = state_dict['iteration']
+            alliters = state_dict['alliters']
+            nowepoch = state_dict['nowepoch']
+        else:
+            iteration = 0
+            alliters = 0
+            nowepoch = 0
         print('loading complete')
     else:
+        print('no pretrained model')
         iteration = 0
         alliters = 0
         nowepoch = 0

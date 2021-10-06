@@ -49,9 +49,9 @@ class trainDataset(Dataset):
         image = Image.fromarray(image)
         if self.transform:
             image = self.transform(image)
-        cv2.imshow('img', image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # cv2.imshow('img', image.detach().cpu().numpy())
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
         labelpath = imgpath.replace('JPEGImages','labels').split('.')[0]+'.txt'
         gt = []
         sample = {}

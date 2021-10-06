@@ -366,11 +366,11 @@ class yolo(nn.Module):
         self.inputwidth = inputwidth
         self.sigmoid = nn.Sigmoid()
         self.anchors_g = self.anchors[self.mask]
-        self.BCE = nn.BCELoss().to(device)
-        self.MSE = nn.MSELoss().to(device)
-        self.CE = nn.CrossEntropyLoss().to(device)
-        # self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1])).to(device)
-        # self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1])).to(device)
+        self.BCE = nn.BCELoss().to(self.device)
+        self.MSE = nn.MSELoss().to(self.device)
+        self.CE = nn.CrossEntropyLoss().to(self.device)
+        # self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1])).to(self.device)
+        # self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1])).to(self.device)
 
     def forward(self, prediction, gt):
         self.gt = gt
@@ -437,6 +437,8 @@ class yolo(nn.Module):
         targetmask = self.BoolTensor(batch_size, num_anchors, width, height, 5+self.num_classes).fill_(0)
         target = self.FloatTensor(batch_size, num_anchors, width, height, 5+self.num_classes).fill_(0)
         noobjmask = self.BoolTensor(batch_size, num_anchors, width, height).fill_(1)
+        target_scale = self.FloatTensor(batch_size, num_anchors, width, height).fill_(0)
+
         tx = self.FloatTensor(batch_size, num_anchors, width, height).fill_(0)
         ty = self.FloatTensor(batch_size, num_anchors, width, height).fill_(0)
         tw = self.FloatTensor(batch_size, num_anchors, width, height).fill_(0)
@@ -506,15 +508,20 @@ class yolo(nn.Module):
                 predcoord = torch.cat([pred_x, pred_y, pred_w, pred_h], dim=1)
                 p_g_iou = iou_box(batch_gt[:,1:5], predcoord)
                 iou_score[bs, best_n, gtxy[:,1], gtxy[:,0]] = p_g_iou
+                # print(torch.sqrt(2 - batch_gt[:, 3]*batch_gt[:, 4]/width/width), target_scale[bs, best_n, gtxy[:,1], gtxy[:,0], :])
+                scale_tmp = torch.sqrt(2 - batch_gt[:, 3]*batch_gt[:, 4]/width/width)
+                target_scale[bs, best_n, gtxy[:,1], gtxy[:,0]] = scale_tmp
                 lossiou.append(torch.mean(p_g_iou).item())
             else:
                 lossiou.append(0)
         gtconf = targetmask[:,:,:,:,4].float()
-
-        lossx = self.MSE(cxp*targetmask[:,:,:,:,0], tx*targetmask[:,:,:,:,0])
-        lossy = self.MSE(cyp*targetmask[:,:,:,:,1], ty*targetmask[:,:,:,:,1])
-        # lossx = self.BCE(cxp*targetmask[:,:,:,:,0], tx*targetmask[:,:,:,:,0])
-        # lossy = self.BCE(cyp*targetmask[:,:,:,:,1], ty*targetmask[:,:,:,:,1])
+        self.BCE_scale = nn.BCELoss(weight=target_scale).to(self.device)
+        wp, tw = wp*target_scale, tw*target_scale
+        hp, th = hp*target_scale, th*target_scale
+        # lossx = self.MSE(cxp*targetmask[:,:,:,:,0], tx*targetmask[:,:,:,:,0])
+        # lossy = self.MSE(cyp*targetmask[:,:,:,:,1], ty*targetmask[:,:,:,:,1])
+        lossx = self.BCE_scale(cxp*targetmask[:,:,:,:,0], tx*targetmask[:,:,:,:,0])
+        lossy = self.BCE_scale(cyp*targetmask[:,:,:,:,1], ty*targetmask[:,:,:,:,1])
         lossw = self.MSE(wp*targetmask[:,:,:,:,2], tw*targetmask[:,:,:,:,2])
         lossh = self.MSE(hp*targetmask[:,:,:,:,3], th*targetmask[:,:,:,:,3])
         lossobj = self.BCE(confp*objmask, gtconf*objmask)
@@ -524,19 +531,13 @@ class yolo(nn.Module):
         showiou = np.mean(lossiou)
         lossiou = torch.tensor(1 - showiou).requires_grad_(True)
 
-
         # precision50 = torch.sum(iou_score>0.5)/torch.sum(confp>0.5)
         # print(torch.sum(iou_score>0.5), torch.sum(targetmask[:,:,:,:,5:]))
         recall50 = torch.sum(iou_score>0.5)/(torch.sum(classes)+1e-10)
         recall75 = torch.sum(iou_score>0.75)/(torch.sum(classes)+1e-10)
 
-        # if torch.sum(targetmask[:,:,:,:,5:]).item()==0:
-        #     loss = lossnoobjectness
-        #     return loss, 0, 0, 0, torch.mean(confp[noobjmask]).item(), 0
-        # else:
-        loss = (lossx + lossy + lossw + lossh) + lossobj + lossclasses + lossiou # 5*lossobjectness
-        # loss = lossiou + lossobjectness+ lossnoobjectness + 0.3*lossclasses
-        # loss = 5*(lossx + lossy + lossw + lossh) + lossobjectness+ lossnoobjectness*0.5 + lossclasses
+        loss = (lossx + lossy + lossw + lossh) + lossobj + lossclasses
+        # loss = 0.05*lossiou + lossobj + 0.5*lossclasses
         if torch.mean(targetmask[:,:,:,:,4].float()).item()==0:
             objectness = 0
         else:
