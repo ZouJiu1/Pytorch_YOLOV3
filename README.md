@@ -1,4 +1,24 @@
 ### Pytorch_YOLOV3 <br>
+### upgrade version 6 2022-11-13
+
+Maybe I know the reason why the mAP of validation dataset is so slow in version3 2022-09
+
+the first reason is that I used a big network yolov3, yolov3 is big, it has so many parameters and the training dataset is little just thousand, and I didn't used a pretrained model, and the train epoch <300. So it must be overfitted and not merged
+
+another reason which is I used albumentations to augment images which old version is lower than 1.2.0 and the labels used in training and the labels used in validation is different. now I find it and upgrade the albumentations to version 1.3.0. 
+
+other reasons are the codes level ...
+
+##### The solution
+I don't have a computer which has a gpu,  I rent a computer which has gpu before.  I use [a small network](https://github.com/dog-qiuqiu/Yolo-Fastest) using pytorch from other person, which name is yolofastest and you can visit it from [thisweb](https://github.com/dog-qiuqiu/Yolo-Fastest), yolofastest use the darknet to train.
+
+##### The training result
+this time, the network is merged and the mAP is higher than before, you can train your own dataset using command
+use `allcodes\\preprocess.py or allcodes\\preprocess_v.py` get data<br>
+`
+python allcodes/train_yolofastest.py
+`
+
 ### --------------==================version 3 2022-09========------------------------------------ <br>
 ### download voc data 
 [https://pjreddie.com/projects/pascal-voc-dataset-mirror/](https://pjreddie.com/projects/pascal-voc-dataset-mirror/)
