@@ -1,5 +1,5 @@
 ### Pytorch_YOLOV3 <br>
-### upgrade version 6 2022-11-13
+### upgrade version 6 2022-11-13 
 
 Maybe I know the reason why the mAP of validation dataset is so slow in version3 2022-09
 
