@@ -35,12 +35,7 @@ python allcodes/train_730.py
 python allcodes/predict_730.py
 ```
 #### train_overfit
-<img src="images/730/train_overfit/006071.jpg" width="99%" /> <br>
-<img src="images/730/train_overfit/009073.jpg" width="99%" /><br>
-<img src="images/730/train_overfit/2010_003585.jpg" width="99%" /><br>
 #### validation
-<img src="images/730/valid/000606.jpg" width="99%" /> <br>
-<img src="images/730/valid/007818.jpg" width="99%" /><br>
 #### you can download yolov3 weight from here [https://pan.baidu.com/s/1hWIxV2MggrzL_vlnbMbP_w?pwd=sugw](https://pan.baidu.com/s/1hWIxV2MggrzL_vlnbMbP_w?pwd=sugw)
 ### --------------==================version 2 2022-09========------------------------------------ <br>
 data is same as version 3
@@ -52,8 +47,7 @@ data is same as version 3
 python allcodes/train_717_730.py
 #predict
 python allcodes/predict_717_730.py
-```
-<img src="images/717_730/train_overfit/2008_007529.jpg" width="39%" /> <img src="images/717_730/valid/003304.jpg" width="39%" /> 
+```> 
 <br>
 ### --------------==================version 1 2021-08========------------------------------------ <br>
 ##### dataset used is voc2007, processed dataset can download from [processedvoc20072012](https://share.weiyun.com/NLjLT13V), unzip it to datas directory，[voc pretrained model](https://share.weiyun.com/7sTyVd7N)<br> 
@@ -64,7 +58,6 @@ python models/train.py
 python predict.py
 ```
 <br>
-<img src="images/1.jpg" width="31%" /> <img src="images/2.jpg" width="31%" /> <img src="images/3.jpg" width="31%" />
 
 ## Reference
 [https://github.com/Peterisfar/YOLOV3](https://github.com/Peterisfar/YOLOV3)<br>
