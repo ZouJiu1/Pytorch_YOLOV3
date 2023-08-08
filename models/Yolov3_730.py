@@ -400,7 +400,7 @@ def GIOU_xywh_torch(boxes1, boxes2):
     enclose_area = enclose_section[..., 0] * enclose_section[..., 1]
 
     GIOU = IOU - 1.0 * (enclose_area - union_area) / enclose_area
-    return IOU
+    return GIOU
 
 
 def iou_xywh_torch(boxes1, boxes2):
@@ -472,6 +472,7 @@ class yolo(nn.Module):
         predy = ((cyp + y_coord) * self.stride).to(self.device)     #[2, 13, 13, 3]
         predw = ((torch.exp(wp) * mask_anchor_w) * self.stride).to(self.device)      #[2, 13, 13, 3]
         predh = ((torch.exp(hp) * mask_anchor_h) * self.stride).to(self.device)     #[2, 13, 13, 3]
+
         return predx, predy, predw, predh, confp, classesp, \
                cxp, cyp, wp, hp, prediction[:, :, :, :, 4], prediction[:, :, :, :, 5:]
 
@@ -519,15 +520,12 @@ class lossyolo(nn.Module):
         assert self.inputwidth == imgsize
 
         predxywh = torch.stack([predx, predy, predw, predh], dim = -1)
-        # print(999, torch.sum(predx).item(), torch.sum(predy).item(), torch.sum(predw).item(), torch.sum(predh).item())
+
         label_xywh = label_bbox[..., :4]
         label_obj_mask = label_bbox[..., 4]
         label_cls  = label_bbox[..., 5:]
 
         giou = GIOU_xywh_torch(predxywh, label_xywh)
-        # if torch.isnan(torch.sum(giou)).item()==True:
-        #     print("torch.isnan(torch.sum(giou)).item()==True:")
-        #     giou[...] = 0
         bbox_loss_scale = 2.0 - 1.0 * label_xywh[..., 2] * label_xywh[..., 3] / (imgsize ** 2)
         lossgiou = label_obj_mask * bbox_loss_scale * (1.0 - giou)
         lossgiou = lossgiou.unsqueeze(-1)
@@ -545,9 +543,6 @@ class lossyolo(nn.Module):
         loss_giou = torch.sum(lossgiou)/batch_size
         loss_conf = torch.sum(lossconf)/batch_size
         loss_cls  = torch.sum(losscls)/batch_size
-        # print(loss_giou, torch.sum(label_obj_mask).item(), torch.sum(bbox_loss_scale).item(), torch.sum(giou).item(), loss_conf.item(), loss_cls.item(), torch.sum(predxywh).item(),\
-        # torch.sum(label_xywh).item())
-
 
         loss = loss_giou + loss_conf + loss_cls
 
@@ -626,28 +621,28 @@ class Yolov3(nn.Module):
         else:
             #检测或者测试时返回值
             results = [large_pre[:-6], middle_pre[:-6], small_pre[:-6]]
-            ##[2, 13, 13, 3]、~、~、~、~、#[2, 13, 13, 20, 3]
+            ##[2, 3, 13, 13]、~、~、~、~、#[2, 3, 13, 13, 20]
             batch_size = results[0][0].size()[0]
             prediction = [[]]*batch_size
-            #[2, 13, 13, 3]、[2, 13, 13, 3]、[2, 13, 13, 3]、[2, 13, 13, 3]、[2, 13, 13, 3]、[2, 13, 13, 3, 20])
+            #[2, 3, 13, 13]、[2, 3, 13, 13]、[2, 3, 13, 13]、[2, 3, 13, 13]、[2, 3, 13, 13]、[2, 3, 13, 13, 20])
             for predx, predy, predw, predh, confp, classesp in results:
-                feature_scale = predx.size()[2] #13、26、52
+                feature_scale = predx.size()[-1] #13、26、52
 
-                confp = torch.unsqueeze(confp, -1)    ##[2, 13, 13, 3， 1]
-                scoresp = confp*classesp             ##[2, 13, 13, 3, 20]
-                scoresmaxp, scores_labelp = torch.max(scoresp, dim=4)      ##[2, 13, 13, 3]、[2, 13, 13, 3]
-                mask = scoresmaxp > self.score_thresh    ##[2, 13, 13, 3]
+                confp = torch.unsqueeze(confp, 4)    ##[2, 3, 13, 13, 1]
+                scoresp = confp*classesp             ##[2, 3, 13, 13, 20]
+                scoresmaxp, scores_labelp = torch.max(scoresp, dim=4)      ##[2, 3, 13, 13]、[2, 3, 13, 13]
+                mask = scoresmaxp > self.score_thresh    ##[2, 3, 13, 13]
 
-                # scoresmaxp, scores_labelp = torch.max(classesp, dim=4)      ##[2, 13, 13, 3]、[2, 13, 13, 3]
-                # mask = scoresmaxp>self.score_thresh    ##[2, 13, 13, 3]
+                # scoresmaxp, scores_labelp = torch.max(classesp, dim=4)      ##[2, 3, 13, 13]、[2, 3, 13, 13]
+                # mask = scoresmaxp>self.score_thresh    ##[2, 3, 13, 13]
                 for bs in range(batch_size):
                     mas = mask[bs, :, :, :]
                     if torch.sum(mas).item()==0:
                         continue
-                    predx = torch.unsqueeze(predx[bs, mas], 1)/self.inputwidth
-                    predy = torch.unsqueeze(predy[bs,mas], 1)/self.inputwidth
-                    predw = torch.unsqueeze(predw[bs,mas], 1)/self.inputwidth
-                    predh = torch.unsqueeze(predh[bs,mas], 1)/self.inputwidth
+                    predx = torch.unsqueeze(predx[bs, mas], 1)/feature_scale
+                    predy = torch.unsqueeze(predy[bs,mas], 1)/feature_scale
+                    predw = torch.unsqueeze(predw[bs,mas], 1)/feature_scale
+                    predh = torch.unsqueeze(predh[bs,mas], 1)/feature_scale
                     scoresmaxp = torch.unsqueeze(scoresmaxp[bs, mas], 1) 
                     scores_labelp = torch.unsqueeze(scores_labelp[bs, mas], 1)
                     predict = list(torch.cat([predx, predy, predw, predh, scoresmaxp, scores_labelp], dim=1).detach().cpu().numpy())

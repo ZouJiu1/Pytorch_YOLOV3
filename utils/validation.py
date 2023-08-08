@@ -6,23 +6,19 @@ import torch
 import os
 import cv2
 import sys
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
-from config.config717_730 import *
+sys.path.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
+from config.config import *
 from mAP.mAP import calculate
 
 def validation_map(model, validloader):
     model.eval()
-    if not os.path.exists(validsave):
-        os.mkdir(validsave)
     for i in os.listdir(validsave):
         os.remove(os.path.join(validsave, i))
     for i, (image, nam) in enumerate(validloader):
         if i > 300:
             break
         b, c, h, w = image.size()
-        image = image.to(device)
-        p = model(image, True)[0]
+        p = model(image)[0]
         if p.shape[1]==0:
             continue
         p = p[0]
@@ -37,14 +33,11 @@ def validation_map(model, validloader):
         tails = nam[0][-6:].split('.')[-1]
         ff = open(os.path.join(validsave, nam[0].replace(tails, 'txt')), 'w')
         for j in range(len(label)):
-            # print(cxp, cyp, wp, hp, maxscore, label)
-            try:
-                minx, miny, maxx, maxy =  min(w-1, max(0, int(xmin[j]))), min(h-1, max(0, int(ymin[j]))), \
-                    min(w-1, max(0, int(xmax[j]))), min(h-1, max(0, int(ymax[j])))
-            except:
-                pass
-            ff.write(classes[int(label[j])]+','+str(minx)+','+str(miny)+\
-                ","+str(maxx)+','+str(maxy)+','+str(maxscore[0].item())+'\n')
+            print(label)
+            minx, miny, maxx, maxy =  min(w-1, max(0, int(xmin[j]))), min(h-1, max(0, int(ymin[j]))), \
+                min(w-1, max(0, int(xmax[j]))), min(h-1, max(0, int(ymax[j])))
+            ff.write(classes[int(label[j])]+' '+str(minx)+' '+str(miny)+\
+                " "+str(maxx)+' '+str(maxy)+' '+str(maxscore))
             # try:
             #     cv2.rectangle(image, (minx, miny), (maxx, maxy), [255, 0, 0], 1)
             # except Exception as e:
@@ -54,50 +47,4 @@ def validation_map(model, validloader):
             # cv2.putText(image, text, (minx, miny+13), cvfont, 0.5, [255, 0, 255], 1)
         ff.close()
     return calculate(validtruth, validsave, classes)
-
-
-def validation_map_myself(model, validloader):
-    model.eval()
-    if not os.path.exists(validsave):
-        os.mkdir(validsave)
-    for i in os.listdir(validsave):
-        os.remove(os.path.join(validsave, i))
-    for i, (image, nam) in enumerate(validloader):
-        if i > 300:
-            break
-        b, c, h, w = image.size()
-        image = image.to(device)
-        p = model(image, [])[0]
-        if p.shape[1]==0:
-            continue
-        p = p[0]
-        cxp, cyp, wp, hp, maxscore, label = p[:,0], p[:,1], p[:,2], p[:,3], p[:,4], p[:,5]
-        xmin = (cxp - wp/2)*w
-        ymin = (cyp - hp/2)*h
-        xmax = (cxp + wp/2)*w
-        ymax = (cyp + hp/2)*h
-        # cvfont = cv2.FONT_HERSHEY_SIMPLEX
-        # image = np.asarray(image)
-        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        tails = nam[0][-6:].split('.')[-1]
-        ff = open(os.path.join(validsave, nam[0].replace(tails, 'txt')), 'w')
-        for j in range(len(label)):
-            # print(cxp, cyp, wp, hp, maxscore, label)
-            try:
-                minx, miny, maxx, maxy =  min(w-1, max(0, int(xmin[j]))), min(h-1, max(0, int(ymin[j]))), \
-                    min(w-1, max(0, int(xmax[j]))), min(h-1, max(0, int(ymax[j])))
-            except:
-                continue
-            ff.write(classes[int(label[j])]+','+str(minx)+','+str(miny)+\
-                ","+str(maxx)+','+str(maxy)+','+str(maxscore[0].item())+'\n')
-            # try:
-            #     cv2.rectangle(image, (minx, miny), (maxx, maxy), [255, 0, 0], 1)
-            # except Exception as e:
-            #     print(e)
-            #     continue
-            # text = classes[int(label[j])] + ' ' + str(round(maxscore[j].item(),3))
-            # cv2.putText(image, text, (minx, miny+13), cvfont, 0.5, [255, 0, 255], 1)
-        ff.close()
-    return calculate(validtruth, validsave, classes)
-
 

@@ -426,9 +426,9 @@ class yolo(nn.Module):
         self.areas      = self.inputwidth ** 2
         self.sigmoid = nn.Sigmoid()
         self.anchors_g = self.anchors[self.mask]
-        self.BCE = nn.BCELoss(reduction='none').to(self.device)
-        self.MSE = nn.MSELoss(reduction='none').to(self.device)
-        # self.CE = nn.CrossEntropyLoss().to(self.device)
+        self.BCE = nn.BCELoss().to(self.device)
+        self.MSE = nn.MSELoss().to(self.device)
+        self.CE = nn.CrossEntropyLoss().to(self.device)
         self.strides = torch.unsqueeze(self.strides, 1)
         self.anchors = self.anchors/self.strides             #[9, 2]
         # self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1])).to(self.device)
@@ -488,7 +488,7 @@ class yolo(nn.Module):
         predh = torch.exp(hp)*mask_anchor_h     #[2, 3, 13, 13]
 
         if len(self.gt)==0:
-            return predx, predy, predw, predh, confp, classesp, 3, 3, 3
+            return predx, predy, predw, predh, confp, classesp, 3, 3
 
         numpic = self.gt[:, -1]
         assert batch_size==numpic[-1] + 1
@@ -509,7 +509,7 @@ class yolo(nn.Module):
         classes = self.FloatTensor(batch_size, num_anchors, width, height, self.num_classes).fill_(0)
         objmask = self.BoolTensor(batch_size, num_anchors, width, height).fill_(0)
         ignore_mask = self.BoolTensor(batch_size, num_anchors, width, height).fill_(0)
-        noobjconfmask = torch.BoolTensor(batch_size, num_anchors, height, width).fill_(True).to(self.device)
+
         #对于每个label计算和anchor之间IOU最匹配的特征层，不考虑中心点位置
         lossiou = 0
         glossiou = []
@@ -521,28 +521,8 @@ class yolo(nn.Module):
         ioulos_col = torch.zeros(0).to(self.device)
         num_correct = 0
         all_gtnums  = len(self.gt)
-        
         for bs in range(batch_size):
             batch_gt = self.gt[self.gt[:, -1]==bs][:, :-1]
-
-            gtxyxy = torch.zeros((batch_gt.size()[0], 3 + 1), dtype=torch.float32).to(self.device) #[gt, 4]
-            gtxyxy[:, 0] = (batch_gt[:, 1] - batch_gt[:, 3] * 0.5) * self.inputwidth
-            gtxyxy[:, 1] = (batch_gt[:, 2] - batch_gt[:, 4] * 0.5) * self.inputwidth
-            gtxyxy[:, 2] = (batch_gt[:, 1] + batch_gt[:, 3] * 0.5) * self.inputwidth
-            gtxyxy[:, 3] = (batch_gt[:, 2] + batch_gt[:, 4] * 0.5) * self.inputwidth
-            a_n  = 3    #3 anchors
-            prxyxy = torch.zeros((a_n, width, height, 3 + 1), dtype=torch.float32).to(self.device)   #[a_n, 4]
-            prxyxy[:, :, :, 0]  = ((predx[bs, :, :, :] - predw[bs, :, :, :] * 0.5)/width) * self.inputwidth   #[num_anchors, height, width, 4]
-            prxyxy[:, :, :, 1]  = ((predy[bs, :, :, :] - predh[bs, :, :, :] * 0.5)/height) * self.inputwidth  #[num_anchors, height, width, 4]
-            prxyxy[:, :, :, 2]  = ((predx[bs, :, :, :] + predw[bs, :, :, :] * 0.5)/width) * self.inputwidth   #[num_anchors, height, width, 4]
-            prxyxy[:, :, :, 3]  = ((predy[bs, :, :, :] + predh[bs, :, :, :] * 0.5)/height) * self.inputwidth  #[num_anchors, height, width, 4]
-            prxyxy = prxyxy.view((-1, 4))   #[num_anchors*height*width, 4]
-            g_p_iou = box_iou(gtxyxy, prxyxy)   #[gt, num_anchors*height*width]
-            g_p_iou = g_p_iou.view((g_p_iou.size()[0], num_anchors, height, width))
-            max_val, max_ind  = torch.max(g_p_iou, dim = 0)  #[num_anchors, height, width] max value for every masked anchor
-            gt_allpreds_iou = max_val > self.ignore_thresh
-            noobjconfmask[bs, gt_allpreds_iou] = False
-            
             for i, rectangle in enumerate(batch_gt):
                 center_x = rectangle[1] * mapsize
                 center_y = rectangle[2] * mapsize
@@ -562,17 +542,15 @@ class yolo(nn.Module):
                 anchorxyxy[:, 3] = center_y + self.anchors[self.mask, 1] * 0.5
                 iouanchor = box_iou(gtxyxy, anchorxyxy)[0]
                 ioumask = iouanchor > 0.3
-                if(torch.sum(ioumask).item()==0):
-                    continue
-                noobjconfmask[bs, ioumask, int(center_x), int(center_y)] = False
-                #     _, ind = torch.max(iouanchor, dim=0)
-                #     objectness[bs, ind, int(center_x), int(center_y)] = 1
+
                 gtctx[bs, ioumask, int(center_x), int(center_y)] = center_x
                 gtcty[bs, ioumask, int(center_x), int(center_y)] = center_y
                 gtw[bs, ioumask, int(center_x), int(center_y)] = gtwidth
                 gth[bs, ioumask, int(center_x), int(center_y)] = gtheight
                 objectness[bs, ioumask, int(center_x), int(center_y)] = 1
-
+                # if(torch.sum(ioumask).item()==0):
+                #     _, ind = torch.max(iouanchor, dim=0)
+                #     objectness[bs, ind, int(center_x), int(center_y)] = 1
                 objmask[bs, ioumask, int(center_x), int(center_y)] = True
                 classes[bs, ioumask, int(center_x), int(center_y), label] = 1
                 
@@ -582,7 +560,7 @@ class yolo(nn.Module):
                 ofh = torch.log(gtheight/mask_anchor_h[0, :, 0, 0][ioumask])
                 offsetw[bs, ioumask, int(center_x), int(center_y)] = ofw.float()
                 offseth[bs, ioumask, int(center_x), int(center_y)] = ofh.float()
-                
+
                 predict_x = predx[bs, ioumask, int(center_x), int(center_y)]
                 predict_y = predy[bs, ioumask, int(center_x), int(center_y)]
                 predict_w = predw[bs, ioumask, int(center_x), int(center_y)]
@@ -596,7 +574,7 @@ class yolo(nn.Module):
 
                 boxloss_scale =   2.0 - ((1.0 * (gtwidth * scale) * (gtheight * scale)) / self.areas)
                 smallscales[bs, ioumask, int(center_x), int(center_y)] = boxloss_scale
-                
+
                 p_g_iou       =   box_iou(gtxyxy, predict_xyxy)[0]
                 iou_col       =   torch.cat([iou_col, p_g_iou])
 
@@ -610,30 +588,26 @@ class yolo(nn.Module):
                     num_correct += 1
         
         nProposals = int((confp > 0.5).sum().item())
-        # recall = float(num_correct/all_gtnums) if all_gtnums else 1
-        # precision = float(num_correct/(nProposals+1e-10))
+        recall = float(num_correct/all_gtnums) if all_gtnums else 1
+        precision = float(num_correct/(nProposals+1e-10))
 
-        self.BCE_scale = nn.BCELoss(reduce='none').to(self.device)
-        # wp, offsetw = wp * smallscales, offsetw * smallscales
-        # hp, offseth = hp * smallscales, offseth * smallscales
-        lossx         =  torch.sum(self.BCE_scale(cxp, offsetctx) * smallscales)/batch_size
-        lossy         =  torch.sum(self.BCE_scale(cyp, offsetcty) * smallscales)/batch_size
-        # print(torch.sum(wp).item(), torch.sum(offsetw).item())
-        lossw         =  torch.sum(self.MSE(wp, offsetw))/batch_size
-        lossh         =  torch.sum(self.MSE(hp, offseth))/batch_size
-        lossobj     =  objectness * self.BCE(confp, objectness) * self.MSE(confp, objectness)
-        lossclasses   =  torch.sum(self.BCE(classesp, classes))/batch_size
+        self.BCE_scale = nn.BCELoss(weight=smallscales).to(self.device)
+        wp, offsetw = wp * smallscales, offsetw * smallscales
+        hp, offseth = hp * smallscales, offseth * smallscales
+        lossx         =  self.BCE_scale(cxp, offsetctx)
+        lossy         =  self.BCE_scale(cyp, offsetcty)
+        lossw         =  self.MSE(wp, offsetw)
+        lossh         =  self.MSE(hp, offseth)
+        lossobj       =  self.BCE(confp, objectness)
+        lossclasses   =  self.BCE(classesp, classes)
         recall50 = torch.sum(iou_col>0.5)/(torch.sum(classes)+1e-10)
         recall75 = torch.sum(iou_col>0.75)/(torch.sum(classes)+1e-10)
-        lossnoobj   =  (1 - objectness) * self.BCE_scale(confp, objectness) * self.MSE(confp, objectness) * noobjconfmask
-        lossnoobj   =  torch.sum(lossnoobj)/batch_size
-        lossobj     =  torch.sum(lossobj)/batch_size
 
         if(len(ioulos_col)==0):
             lossiou = torch.zeros(1).to(self.device)
         else:
             lossiou = torch.mean(ioulos_col)
-        loss = (lossx + lossy + lossw + lossh) + lossobj + lossclasses + lossiou + lossnoobj
+        loss = (lossx + lossy + lossw + lossh) + lossobj + lossclasses + lossiou
 
         if(torch.sum(objmask).item()==0):
             objectnessscore = 0
@@ -641,14 +615,7 @@ class yolo(nn.Module):
             objectnessscore = torch.mean(confp[objmask]).item()
         noobjectness = torch.mean(confp[~objmask]).item()
 
-        if(torch.sum(objmask).item()==0):
-            # objectnessscore = 0
-            cls = 0
-        else:
-            # objectnessscore = torch.sum(confp * objectness).item()
-            cls = torch.mean(classesp[objmask]).item()
-
-        return loss, objectnessscore, recall50.item(), recall75.item(), noobjectness, lossiou, num_correct, nProposals, cls
+        return loss, objectnessscore, recall50.item(), recall75.item(), noobjectness, lossiou, recall, precision
 
 class Yolov3(nn.Module):
     def __init__(self, num_classes, anchors, strides, ignore_thresh, inputwidth,device,\
@@ -697,39 +664,37 @@ class Yolov3(nn.Module):
         up3, y3 = self.hb3(r3) #y3 [2, 255, 13, 13]
         #当训练时即len(self.gt)==0 返回的就是loss、准确率、召回率、~、预测置信度、预测类别
         #测试或者detect时，就是predx, predy, predw, predh, confp, classesp
-        result3, objectness3, recall50_3, recall75_3, noobjectness3, lossiou3, num_correct3, nProposals3, classes3 = self.yolo3(y3, deepcopy(self.gt))
+        result3, objectness3, recall50_3, recall75_3, noobjectness3, lossiou3, recall3, precision3 = self.yolo3(y3, deepcopy(self.gt))
 
         #进入header层并上采样
         r2up = torch.cat([up3, upy2], dim=1)
         up2, y2 = self.hb2(r2up) #y2 [2, 255, 26, 26]
         #当训练时即len(self.gt)==0 返回的就是loss、准确率、召回率、~、预测置信度、预测类别
         #测试或者detect时，就是predx, predy, predw, predh, confp, classesp
-        result2, objectness2, recall50_2, recall75_2, noobjectness2, lossiou2, num_correct2, nProposals2, classes2 = self.yolo2(y2, deepcopy(self.gt))
+        result2, objectness2, recall50_2, recall75_2, noobjectness2, lossiou2, recall2, precision2 = self.yolo2(y2, deepcopy(self.gt))
 
         #进入header层
         r1up = torch.cat([up2, upy1], dim=1)
         y1 = self.hb1(r1up) #y1 [2, 255, 52, 52]
         #当训练时即len(self.gt)==0 返回的就是loss、准确率、召回率、~、预测置信度、预测类别
         #测试或者detect时，就是predx, predy, predw, predh, confp, classesp
-        result1, objectness1, recall50_1, recall75_1, noobjectness1, lossiou1, num_correct1, nProposals1, classes1 = self.yolo1(y1, deepcopy(self.gt))
+        result1, objectness1, recall50_1, recall75_1, noobjectness1, lossiou1, recall1, precision1 = self.yolo1(y1, deepcopy(self.gt))
 
         #[2, 255, 13, 13]、[2, 255, 26, 26]、[2, 255, 52, 52]
         if len(self.gt)!=0:
             #训练时返回值
             length = len(np.where(np.array([objectness3,objectness2,objectness1])!=0)[0])
             # print(objectness3, objectness2, objectness1, length)
-            objectness = (objectness3 + objectness2 + objectness1)/length
-            noobjectness = (noobjectness3 + noobjectness2 + noobjectness1)/3
-            recall50 = (recall50_1 + recall50_2 + recall50_3)/len(self.gt)
-            recall75 = (recall75_1 + recall75_2 + recall75_3)/len(self.gt)
-            correct = num_correct1 + num_correct2 + num_correct3
-            recall = correct/len(self.gt)
-            precision = correct/(nProposals1 + nProposals2 + nProposals3 + 1e-10)
-            class_score = (classes1 + classes2 + classes3)/length
-            return result3, result2, result1, objectness, recall50, recall75, noobjectness, recall, precision, class_score
+            objectness = (objectness3 + objectness2 + objectness1)/(length + 1e-10)
+            noobjectness = (noobjectness3 + noobjectness2 + noobjectness1)/(length + 1e-10)
+            recall50 = (recall50_1 + recall50_2 + recall50_3)/(length + 1e-10)
+            recall75 = (recall75_1 + recall75_2 + recall75_3)/(length + 1e-10)
+            recall = (recall3 + recall2 + recall1)/3
+            precision = (precision3 + precision2 + precision1)/3
+            return result3, result2, result1, objectness, recall50, recall75, noobjectness, recall, precision
         else:
             #检测或者测试时返回值
-            results = [[result3, objectness3, recall50_3, recall75_3, noobjectness3, lossiou3],\
+            results = [[result3, objectness3, recall50_3, recall75_3, noobjectness3, lossiou3]\
                 [result2, objectness2, recall50_2, recall75_2, noobjectness2, lossiou2],\
                 [result1, objectness1, recall50_1, recall75_1, noobjectness1, lossiou1]]
             ##[2, 3, 13, 13]、~、~、~、~、#[2, 3, 13, 13, 20]

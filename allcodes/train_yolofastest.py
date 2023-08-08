@@ -20,7 +20,7 @@ from utils.common import cvshow, validDataset, collate_fn
 from utils.validation_yolofastest import validation_map
 from torch.utils.data import Dataset, DataLoader
 from loaddata.load_datas_yolofastest import trainDataset
-from config.config730_yolofastest import *
+from config.config_yolofastest import *
 from multiprocessing import cpu_count
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
@@ -152,6 +152,7 @@ def trainer():
             continue
         count = 0
         for i, (image, label_sbbox, label_mbbox, sbbox, mbbox) in enumerate(dataloader):
+            optimizer.zero_grad()
             # cvshow(image, label)   #cv2 show inputs images
             stepiters += 1
             # if stepiters<alliters:
@@ -167,7 +168,6 @@ def trainer():
             # loss.requires_grad_(True)
             # loss = loss.to(device)
             # if torch.isnan(loss).item()==False:
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -193,7 +193,7 @@ recall50: {:.3f}, recall75: {:.3f}, loss: {:.3f}, avgloss: {:.3f}, loss_giou: {:
             __savepath__ = os.path.join(savepath, tim)+prefix
             if not os.path.exists(__savepath__):
                 os.makedirs(__savepath__)
-            if(pre_map < map) or (epoch+1)%3==1:
+            if(pre_map < map) or (epoch+1)%3==1 or epoch==num_epochs-1:
                 torch.save(savestate, __savepath__+os.sep+r'model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
                 print('savemodel ')
                 pre_map = map

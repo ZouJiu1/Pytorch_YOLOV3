@@ -6,8 +6,7 @@
 import os
 import cv2
 import sys
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
+sys.path.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
 import time
 import torch
 import datetime
@@ -108,7 +107,7 @@ def trainer():
 
     if load_darknet_w:
         # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\projects\tmp\darknet53_448.weights") #r"log\darknet53_448.weights")
-        # load_darknet_weights(model, r"/home/Pytorch_YOLOV3\log\darknet53.conv.74")
+        # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\darknet53.conv.74")
         load_darknet_weights(model, darknet_weight)
         print('loaded darknet weight......')
     model = model.to(device)
@@ -190,7 +189,7 @@ recall50: {:.3f}, recall75: {:.3f}, loss: {:.3f}, avgloss: {:.3f}, recall: {:.3f
         print("validation......num_img: {}, mAP: {}, premap:{}".format(len(validdata), map, pre_map))
         try:
             if(pre_map < map) or epoch%3==2:
-                torch.save(savestate, r'/home/Pytorch_YOLOV3\log\model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
+                torch.save(savestate, r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\log\model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
             print('savemodel ')
         except:
             print('error: don\'t savemodel')

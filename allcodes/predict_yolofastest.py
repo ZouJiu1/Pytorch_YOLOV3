@@ -16,7 +16,7 @@ sys.path.append(nowpath)
 from models.Yolofastest import yolofastestNet
 from PIL import Image
 import torch.optim as optim
-from config.config730_yolofastest import *
+from config.config_yolofastest import *
 # from tensorboardX import SummaryWriter
 # from torchviz import make_dot
 

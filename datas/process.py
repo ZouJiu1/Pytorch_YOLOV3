@@ -33,7 +33,7 @@ def prepro():
         if cnt!=0:
             os.rename(os.path.join(inpath, 'x.txt'), os.path.join(inpath, i))
     x = ['test.txt', 'train.txt', 'val.txt']
-    inpath = r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\VOC2007copyss'
+    inpath = r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\VOC2007copyss'
     for i in x:
         if 'x.txt' in i:
             continue
@@ -50,7 +50,7 @@ def prepro():
     os.remove(os.path.join(inpath, 'x.txt'))
 
 def sample():
-    traintxt= r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\VOC2007copyss\train.txt'
+    traintxt= r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\VOC2007copyss\train.txt'
     lis = []
     with open(traintxt, 'r') as f:
         for i in f.readlines():
@@ -59,18 +59,18 @@ def sample():
     np.random.shuffle(lis)
     np.random.shuffle(lis)
     lis = lis[:600]
-    f = open(r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\train\train.txt', 'w')
+    f = open(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\train.txt', 'w')
     for i in lis:
         print(i)
         nam = i.split(os.sep)[-1]
         txt = i.replace("JPEGImages", 'labels').replace("jpg", "txt")
-        shutil.copyfile(i, r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\train\JPEGImages\\'+nam)
-        shutil.copyfile(txt, r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\train\labels\\'+nam.replace("jpg", "txt"))
-        f.write(r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\train\JPEGImages\\'+nam+'\n')
+        shutil.copyfile(i, r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\JPEGImages\\'+nam)
+        shutil.copyfile(txt, r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\labels\\'+nam.replace("jpg", "txt"))
+        f.write(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\JPEGImages\\'+nam+'\n')
     f.close()
 
 def static():
-    inpath = r'C:\Users\ZouJiu\Desktop\projects\Pytorch_YOLOV3\datas\train\labels'
+    inpath = r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\labels'
     dic = {}
     for i in os.listdir(inpath):
         with open(os.path.join(inpath, i), 'r') as f:

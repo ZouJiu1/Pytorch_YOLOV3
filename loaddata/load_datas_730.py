@@ -136,7 +136,7 @@ class trainDataset(Dataset):
                 one_iou = box_iou(gtone, anchorxyxy)[0] #[1, 3]
                 iou.extend(one_iou.detach().cpu().numpy())
                 ioumask = one_iou > 0.3
-                print(ja, ioumask)
+
                 if(torch.sum(ioumask).item() > 0):
                     labels[ja][cy, cx, ioumask, 0] = ncx * self.inputwidth   #center x     #原图尺寸的坐标
                     labels[ja][cy, cx, ioumask, 1] = ncy * self.inputwidth  #center y
@@ -173,7 +173,7 @@ class trainDataset(Dataset):
         return label_sbbox, label_mbbox, label_lbbox, sbbox, mbbox, lbbox
 
 if __name__ == '__main__':
-    trainpath = r'/home/Pytorch_YOLOV3\datas\train\train.txt'
+    trainpath = r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\train.txt'
     inputwidth = 416
     anchors = [[[10,13], [16,30], [33,23]],\
         [[30,61],  [62,45],  [59,119]],  \

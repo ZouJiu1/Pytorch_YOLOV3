@@ -8,7 +8,7 @@ import cv2
 import sys
 nowpath = os.path.abspath("./")
 sys.path.append(nowpath)
-from config.config730_yolofastest import *
+from config.config_yolofastest import *
 from mAP.mAP import calculate
 from PIL import Image
 
@@ -24,8 +24,10 @@ def validation_map(model):
             i = i.strip()
             if os.path.exists(i):
                 kl.append(i)
-    if len(kl)>600:
-        kl = np.random.choice(kl, 600, replace=False)
+    if len(kl)>100:
+        np.random.shuffle(kl)
+        kl = kl[:100]
+        # kl = np.random.choice(kl, 600, replace=False)
     length = len(kl)
     for i, pth in enumerate(kl):
         nam = pth.split(os.sep)[-1]

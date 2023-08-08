@@ -469,14 +469,15 @@ class yolo(nn.Module):
             return predx, predy, predw, predh, confp, classesp, 3, 3, 3
 
         numpic = self.gt[:, -1]
+        # print(numpic, batch_size)
         assert batch_size==numpic[-1] + 1
 
         num_anchors = 3
 
-        # gtctx = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
-        # gtcty = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
-        # gtw = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
-        # gth = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
+        gtctx = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
+        gtcty = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
+        gtw = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
+        gth = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
 
         offsetctx = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
         offsetcty = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
@@ -487,7 +488,6 @@ class yolo(nn.Module):
         classes = self.FloatTensor(batch_size, num_anchors, height, width, self.num_classes).fill_(0)
         objmask = torch.BoolTensor(batch_size, num_anchors, height, width).fill_(False).to(self.device)
         noobjconfmask = torch.BoolTensor(batch_size, num_anchors, height, width).fill_(True).to(self.device)
-        ioulossmask = self.FloatTensor(batch_size, num_anchors, height, width).fill_(0)
 
         #对于每个label计算和anchor之间IOU最匹配的特征层，不考虑中心点位置
         lossiou = 0
@@ -547,11 +547,6 @@ class yolo(nn.Module):
 
                 a_total = 9 #total 9 anchors
                 anchorxyxy = torch.zeros((a_total, 3+1)).to(self.device)
-                # strides = self.inputwidth/width
-                # ori_anc_w = self.ori_anchors[:, 0]/strides
-                # ori_anc_h = self.ori_anchors[:, 1]/strides
-                # ori_anc_w = ori_anc_w/width
-                # ori_anc_h = ori_anc_h/height
                 anchorxyxy[:, 0] = (rectangle[1] - self.ori_a_w * 0.5) * self.inputwidth
                 anchorxyxy[:, 1] = (rectangle[2] - self.ori_a_h * 0.5) * self.inputwidth
                 anchorxyxy[:, 2] = (rectangle[1] + self.ori_a_w * 0.5) * self.inputwidth
@@ -570,8 +565,6 @@ class yolo(nn.Module):
                     predone[0, 3]  = ((predy[bs, a_ind, i, j] + predh[bs, a_ind, i, j] * 0.5)/width) * self.inputwidth
                     one_iou = box_iou(gtone, predone)[0]   #[1]
 
-                    ioulossmask[bs, a_ind, i, j] = 1 - one_iou;
-
                     objectness[bs, a_ind, i, j] = 1
                     classes[bs, a_ind, i, j, label] = 1
                     
@@ -587,13 +580,12 @@ class yolo(nn.Module):
 
                     # boxloss_scale =   2.0 - ((1.0 * (gtwidth * scale) * (gtheight * scale)) / self.areas)
                     boxloss_scale = 2.0 - rectangle[3] * rectangle[4]
-                    # print(boxloss_scale, rectangle[3],)
                     smallscales[bs, a_ind, i, j] = boxloss_scale
 
                     iou_col       =   torch.cat([iou_col, one_iou])
 
-                    # iou_los       =   (1 - one_iou) * boxloss_scale
-                    # ioulos_col    =   torch.cat([ioulos_col, iou_los])
+                    iou_los       =   (1 - one_iou) * boxloss_scale
+                    ioulos_col    =   torch.cat([ioulos_col, iou_los])
                     
                     predlabel = torch.argmax(classesp[bs, a_ind, i, j]).item()
                     score = confp[bs, a_ind, i, j].item()
@@ -604,13 +596,13 @@ class yolo(nn.Module):
         # recall = float(num_correct/all_gtnums) if all_gtnums else 1
         # precision = float(num_correct/(nProposals+1e-10))
 
-        # offsetctx = Variable(offsetctx.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # offsetcty = Variable(offsetcty.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # offsetw = Variable(offsetw.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # offseth = Variable(offseth.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # objectness = Variable(objectness.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # classes = Variable(classes.type(torch.FloatTensor), requires_grad=False).to(self.device)
-        # smallscales = Variable(smallscales.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        offsetctx = Variable(offsetctx.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        offsetcty = Variable(offsetcty.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        offsetw = Variable(offsetw.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        offseth = Variable(offseth.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        objectness = Variable(objectness.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        classes = Variable(classes.type(torch.FloatTensor), requires_grad=False).to(self.device)
+        smallscales = Variable(smallscales.type(torch.FloatTensor), requires_grad=False).to(self.device)
         clsmask = classes.type(torch.BoolTensor).to(self.device)
         
         # conf_mask_true = objmask
@@ -624,18 +616,15 @@ class yolo(nn.Module):
         # self.BCE_scale = nn.BCELoss(weight=smallscales[objmask]).to(self.device)
         # wp, offsetw = wp * smallscales, offsetw * smallscales
         # hp, offseth = hp * smallscales, offseth * smallscales
+        # self.BCELoss = nn.BCELoss().to(self.device)
         # print(cxp[objmask].size(), smallscales[objmask].size())
-        lossx         =  self.BCE(cxp, offsetctx) * smallscales * objmask
-        lossy         =  self.BCE(cyp, offsetcty) * smallscales * objmask
-        # self.CEloss= torch.nn.CrossEntropyLoss(reduction='none').to(self.device)
-        # print(cxp.size(), offsetctx.size(), smallscales.size(), self.CEloss(cxp, offsetctx).unsqueeze(1).size(), self.MSE(hp, offseth).size())
-        # lossx         =  self.CEloss(cxp, offsetctx).unsqueeze(1) * smallscales * objmask
-        # lossy         =  self.CEloss(cyp, offsetcty).unsqueeze(1) * smallscales * objmask
-        # lossx         =  smallscales[objmask] * self.BCE(cxp[objmask], offsetctx[objmask]) #0.7 larger than MSE 0.2 
-        # lossy         =  smallscales[objmask] * self.BCE(cyp[objmask], offsetcty[objmask]) #larger than MSE
+        # lossx         =  self.MSE(cxp[objmask] * smallscales[objmask], offsetctx[objmask] * smallscales[objmask])
+        # lossy         =  self.MSE(cyp[objmask] * smallscales[objmask], offsetcty[objmask] * smallscales[objmask])
+        lossx         =  smallscales[objmask] * self.BCE(cxp[objmask], offsetctx[objmask]) #0.7 larger than MSE 0.2 
+        lossy         =  smallscales[objmask] * self.BCE(cyp[objmask], offsetcty[objmask]) #larger than MSE
         # print(wp[objmask], offsetw[objmask], hp[objmask], offseth[objmask], smallscales[objmask])
-        lossw         =  smallscales * self.MSE(wp, offsetw) * objmask
-        lossh         =  smallscales * self.MSE(hp, offseth) * objmask
+        lossw         =  0.5 * smallscales[objmask] * self.MSE(wp[objmask] * smallscales[objmask], offsetw[objmask] * smallscales[objmask])
+        lossh         =  0.5 * smallscales[objmask] * self.MSE(hp[objmask] * smallscales[objmask], offseth[objmask] * smallscales[objmask])
 
         lossx = torch.sum(lossx)/batch_size
         lossy = torch.sum(lossy)/batch_size
@@ -689,12 +678,10 @@ class yolo(nn.Module):
         recall50 = torch.sum(iou_col > 0.5)
         recall75 = torch.sum(iou_col > 0.75)
 
-        lossiou = torch.sum(ioulossmask * smallscales * objmask)/batch_size
-
-        # if(len(ioulos_col)==0):
-        #     lossiou = torch.zeros(1).to(self.device)
-        # else:
-        #     lossiou = torch.mean(ioulos_col)
+        if(len(ioulos_col)==0):
+            lossiou = torch.zeros(1).to(self.device)
+        else:
+            lossiou = torch.mean(ioulos_col)
         # losslis = {"lossx": lossx, "lossy":lossy, "lossw":lossw, "lossh":lossh, \
         #     "lossobj":lossobj, "lossnoobj":lossnoobj, "lossclasses":lossclasses}
 
@@ -702,8 +689,8 @@ class yolo(nn.Module):
         # cls = 1
         # obj = 1
 
-        loss = lossx + lossy + lossw + lossh + lossnoobj + lossclasses + lossobj + lossiou
-        # print(lossx , lossy , lossw , lossh , lossnoobj , lossclasses , lossobj, lossiou)
+        loss = lossx + lossy + lossw + lossh + lossnoobj + lossclasses + lossobj
+        # print(lossx , lossy , lossw , lossh , lossnoobj , lossclasses , lossobj)
 
         # for key, value in losslis.items():
         #     if(torch.isnan(value).item()==True):

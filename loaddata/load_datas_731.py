@@ -172,7 +172,7 @@ class trainDataset(Dataset):
         return label_sbbox, label_mbbox, label_lbbox, sbbox, mbbox, lbbox
 
 if __name__ == '__main__':
-    trainpath = r'/home/Pytorch_YOLOV3\datas\train\train.txt'
+    trainpath = r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\datas\train\train.txt'
     inputwidth = 416
     anchors = [[[10,13], [16,30], [33,23]],\
         [[30,61],  [62,45],  [59,119]],  \

@@ -5,9 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 import sys
-import os
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
+sys.path.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
 from models.Yolov3_730_2 import *
 
 def intialization(model):

@@ -1,12 +1,17 @@
 import os
-import sys
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
-from mAP.utility import *
-from config.config717_730 import classes
 
+abspath = os.path.abspath(__file__)
+filename = os.sep.join(abspath.split(os.sep)[-2:])
+abspath = abspath.replace(filename, "")
+import sys
+sys.path.append(abspath)
+
+from mAP.utility import *
+# from utility import *
+
+import numpy as np
 np.set_printoptions(suppress=True)
-names = classes
+
 # names=['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
 #             'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
 #             'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
@@ -21,9 +26,9 @@ names = classes
 #     "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", \
 #         "tvmonitor"]
 
-truelabels = nowpath + os.sep + r'mAP/groundtruth'
-predictpaths = nowpath + os.sep + r'mAP/predict'
-save_dir = nowpath + os.sep + r'output'
+truelabels = r'groundtruth'
+predictpaths = r'predict'
+save_dir = r'output'
 
 def calculate(truelabel, predictpath, names, plots=False, savefile=False):
     dictrue = []
@@ -43,11 +48,10 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
                 continue
             labels = []
             for fi in f.readlines():
-                if  "," in fi:
+                if ',' in fi:
                     fi = fi.strip().split(',')
-                elif ' ' in fi:
+                elif " " in fi:
                     fi = fi.strip().split(' ')
-                
                 classes, xmin, ymin, xmax, ymax = names.index(fi[0]), float(fi[1]), float(fi[2]), \
                                                             float(fi[3]), float(fi[4])
                 labels.append([classes, xmin, ymin, xmax, ymax])
@@ -56,15 +60,18 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
         #read corresponding predictions
         #读取相应的预测文件
         predn = []
-        with open(os.path.join(predictpath, tl), 'r') as ff:
-            for ffi in ff.readlines():
-                if  "," in ffi:
-                    ffi = ffi.strip().split(',')
-                elif ' ' in ffi:
-                    ffi = ffi.strip().split(' ')
-                classes, xmin, ymin, xmax, ymax, score = names.index(ffi[0]), float(ffi[1]), float(ffi[2]), \
-                                                            float(ffi[3]), float(ffi[4]), float(ffi[5])
-                predn.append([xmin, ymin, xmax, ymax, score, classes])
+        if os.path.exists(os.path.join(predictpath, tl)):
+            with open(os.path.join(predictpath, tl), 'r') as ff:
+                for ffi in ff.readlines():
+                    if ',' in ffi:
+                        ffi = ffi.strip().split(',')
+                    elif " " in ffi:
+                        ffi = ffi.strip().split(' ')
+                    classes, xmin, ymin, xmax, ymax, score = names.index(ffi[0]), float(ffi[1]), float(ffi[2]), \
+                                                                float(ffi[3]), float(ffi[4]), float(ffi[5])
+                    predn.append([xmin, ymin, xmax, ymax, score, classes])
+        else:
+            pass
          # sort prediction by score ascending
         #根据置信度从小到大排序
         predn = sorted(predn.__iter__(), key=lambda x:x[4], reverse=True)
@@ -77,7 +84,7 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
             if nl:
                 #for zeros prediction, we need to append blank lists
                 #即使没有预测内容，仍然要添加相应的空列表
-                stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), []))
             continue
         if nl==0:
             continue
@@ -124,7 +131,7 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
         #收集相应的计算内容
         stats.append((correct.cpu(), predn[:, 4].cpu(), predn[:, 5].cpu(), tcls))
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
-    map50 = 0
+    ap50 = [0, 0]
     if len(stats) and stats[0].any():
         #calculate ap value of each class
         #计算每个类相应的ap值
@@ -132,9 +139,10 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
         p, r, ap50, ap = p[:, 0], r[:, 0], ap[:, 0], ap.mean(1)  # [P, R, AP@0.5, AP@0.5:0.95]
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
+        return ap50
     else:
         nt = torch.zeros(1)
-    return map50
+    return ap50
     if savefile:
         ffopen=open(os.path.join(save_dir, 'mAP.txt'), 'w')
         ffopen.write('predictpaths: '+predictpaths+'\n'+'truelabels: '+truelabels+'\n')
@@ -180,4 +188,12 @@ def calculate(truelabel, predictpath, names, plots=False, savefile=False):
                 )
 
 if __name__ == '__main__':
-    calculate(truelabels, predictpaths, names=names)
+    predictpaths = os.path.join(abspath, 'datas', 'cocoval', "predict")
+    truelabels = os.path.join(abspath, 'datas', 'cocoval', "truth")
+    save_dir = r'/home/featurize/work/Pytorch_YOLOV3/mAP/output'
+    names = []
+    with open(r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/coco.names', 'r', encoding='utf-8') as obj:
+        for i in obj.readlines():
+            i = i.strip()
+            names.append(i)
+    calculate(truelabels, predictpaths, names, savefile = True)

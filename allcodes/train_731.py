@@ -6,8 +6,7 @@
 import os
 import cv2
 import sys
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
+sys.path.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
 import time
 import torch
 import datetime
@@ -15,8 +14,8 @@ import numpy as np
 # from Yolov3copy23 import Yolov3
 from models.Yolov3_731 import lossyolo
 import sys
-sys.path.append(r"/home/Pytorch_YOLOV3")
-from models.yolov3 import Yolov3
+sys.path.append(r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3")
+from model.yolov3 import Yolov3
 import torch.optim as optim
 from utils.utils_731 import load_darknet_weights, intialization, freeze_darknet_backbone
 from utils.common import cvshow, validDataset, collate_fn
@@ -109,13 +108,13 @@ def trainer():
 
     # if load_darknet_w:
         # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\projects\tmp\darknet53_448.weights") #r"log\darknet53_448.weights")
-        # load_darknet_weights(model, r"/home/Pytorch_YOLOV3\log\darknet53.conv.74")
-        # load_darknet_weights(model, r"/home/Pytorch_YOLOV3\log\yolov3.weights")
+        # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\darknet53.conv.74")
+        # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\yolov3.weights")
         # print('loaded darknet weight......')
     model = model.to(device)
     lossfun = lossfun.to(device)
 
-    model.load_darknet_weights(r"/home/Pytorch_YOLOV3\log\yolov3.weights")
+    model.load_darknet_weights(r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\yolov3.weights")
     if freeze_backbone:       #step1 freeze darknet53 backbone parameters to train, because you data number is small
         bre = len([p for p in model.parameters() if p.requires_grad])
         freeze_darknet_backbone(model)
@@ -192,7 +191,7 @@ recall50: {:.3f}, recall75: {:.3f}, loss: {:.3f}, avgloss: {:.3f}, loss_giou: {:
         print("validation......num_img: {}, mAP: {}, premap:{}".format(len(validdata), map, pre_map))
         try:
             if(pre_map < map) or epoch%3==2:
-                torch.save(savestate, r'/home/Pytorch_YOLOV3\log\model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
+                torch.save(savestate, r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
             print('savemodel ')
         except:
             print('error: don\'t savemodel')

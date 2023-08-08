@@ -9,7 +9,7 @@ import cv2
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 import sys
-sys.append(r'/home/Pytorch_YOLOV3')
+sys.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
 from loaddata.load_datas_731 import TF, trainDataset, collate_fn
 from models.Yolov3_731 import *
 import torch.optim as optim

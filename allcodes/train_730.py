@@ -6,8 +6,7 @@
 import os
 import cv2
 import sys
-nowpath = os.path.abspath("./")
-sys.path.append(nowpath)
+sys.path.append(r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3')
 import time
 import torch
 import datetime
@@ -20,7 +19,7 @@ from utils.common import cvshow, validDataset, collate_fn
 from utils.validation import validation_map
 from torch.utils.data import Dataset, DataLoader
 from loaddata.load_datas_730 import trainDataset
-from config.config730 import *
+from config.config import *
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
@@ -30,37 +29,36 @@ def adjust_lr(optimizer, stepiters, epoch, Adam, freeze_backbone, \
     steps1 = 200
     steps2 = 300
     if stepiters < steps0:
-        lr = (0.000001 - 0.0000001) * stepiters/steps0 + 0.0000001
+        lr = (0.001 - 0.0001) * stepiters/steps0 + 0.0001
     elif stepiters < steps1:
-        lr = (0.00001 - 0.000001) * stepiters/steps1 + 0.000001
+        lr = (0.0001 - 0.00001) * stepiters/steps1 + 0.00001
     elif stepiters < steps2:
-        lr = (0.0001 - 0.00001) * stepiters/steps2 + 0.00001
-    elif epoch < 60:
+        lr = (0.001 - 0.0001) * stepiters/steps2 + 0.0001
+    elif epoch < 73:
+        lr = 0.001
+    elif epoch == 73: #unfreeze
+        for p in model.parameters():
+            p.requires_grad = True
+
+        params = [p for p in model.parameters() if p.requires_grad]
+        print('unfreeze all layer to train, now trainable layer number is : ', len(params))
+        flogs.write('unfreeze all layer to train, now trainable layer number is : %d\n'%len(params)+'\n')
+        if Adam:
+            optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
+        else:
+            optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
         lr = 0.0001
-    # elif epoch < 38:
-        # lr = 0.0001
-    elif epoch < 70:
+    elif epoch < 121:
+        lr = 0.0001
+    elif epoch < 130:
         lr = 0.00001
-    elif epoch < 90:
+    elif epoch < 136:
         lr = 0.000001
     else:
         import sys
         sys.exit(0)
-    # if epoch == 10: #unfreeze
-    #     for p in model.parameters():
-    #         p.requires_grad = True
-
-    #     params = [p for p in model.parameters() if p.requires_grad]
-    #     print('unfreeze all layer to train, now trainable layer number is : ', len(params))
-    #     flogs.write('unfreeze all layer to train, now trainable layer number is : %d\n'%len(params)+'\n')
-    #     if Adam:
-    #         optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
-    #     else:
-    #         optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
-    #     lr = 0.0001
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
     return optimizer
 
 def trainer():
@@ -88,12 +86,12 @@ def trainer():
             state_dict = torch.load(pretrainedmodel, map_location='cuda')
         else:
             state_dict = torch.load(pretrainedmodel, map_location='cpu')
-        # delete = []
-        # for key, valu in state_dict['state_dict'].items():
-        #     if 'hb3.conv7' in key or 'hb2.conv7' in key or 'hb1.norm7' in key or 'hb1.conv7' in key or 'hb2.norm7' in key or 'hb3.norm7' in key:
-        #         delete.append(key)
-        # for key in delete:
-        #     state_dict['state_dict'].pop(key)
+        delete = []
+        for key, valu in state_dict['state_dict'].items():
+            if 'hb3.conv7' in key or 'hb2.conv7' in key or 'hb1.norm7' in key or 'hb1.conv7' in key or 'hb2.norm7' in key or 'hb3.norm7' in key:
+                delete.append(key)
+        for key in delete:
+            state_dict['state_dict'].pop(key)
         # exit(0)
         model.load_state_dict(state_dict['state_dict'], strict = False)
         if not scratch:
@@ -106,8 +104,8 @@ def trainer():
 
     if load_darknet_w:
         # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\projects\tmp\darknet53_448.weights") #r"log\darknet53_448.weights")
-        # load_darknet_weights(model, r"/home/Pytorch_YOLOV3\log\darknet53.conv.74")
-        load_darknet_weights(model, darknet_weight)
+        # load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\darknet53.conv.74")
+        load_darknet_weights(model, r"C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\yolov3.weights")
         print('loaded darknet weight......')
     model = model.to(device)
     lossfun = lossfun.to(device)
@@ -153,8 +151,8 @@ def trainer():
         for i, (image, label_sbbox, label_mbbox, label_lbbox, sbbox, mbbox, lbbox) in enumerate(dataloader):
             # cvshow(image, label)   #cv2 show inputs images
             stepiters += 1
-            # if stepiters<alliters:
-            #     continue
+            if stepiters<alliters:
+                continue
             count += 1
             optimizer = adjust_lr(optimizer, stepiters, epoch, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay, flogs)
             
@@ -165,15 +163,12 @@ def trainer():
                            small_pre, middle_pre, large_pre)
             # loss.requires_grad_(True)
             # loss = loss.to(device)
-            if torch.isnan(loss).item()==False:
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-            else:
-                optimizer = adjust_lr(optimizer, 200, epoch, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay, flogs)
-                print(torch.isnan(loss).item(), torch.isnan(loss).item()==False)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
             # statistics
+            running_loss += loss.item()
             epoch_loss = running_loss / count
             logword = '''epoch: {}, ratio:{:.2f}%, iteration: {}, alliters: {}, lr: {:.6f}, obj: {:.3f}, noobj: {:.6f}, \
 recall50: {:.3f}, recall75: {:.3f}, loss: {:.3f}, avgloss: {:.3f}, loss_giou: {:.3f}, loss_conf: {:.3f}, loss_cls: {:.3f}'''.format(
@@ -191,7 +186,7 @@ recall50: {:.3f}, recall75: {:.3f}, loss: {:.3f}, avgloss: {:.3f}, loss_giou: {:
         print("validation......num_img: {}, mAP: {}, premap:{}".format(len(validdata), map, pre_map))
         try:
             if(pre_map < map) or epoch%3==2:
-                torch.save(savestate, savepath+os.sep+r'model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
+                torch.save(savestate, r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\model_{}_{}_map{}_{:.3f}_{}.pth'.format(epoch, stepiters, map, loss.item(),tim))
             print('savemodel ')
         except:
             print('error: don\'t savemodel')
