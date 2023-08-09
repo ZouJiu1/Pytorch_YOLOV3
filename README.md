@@ -1,4 +1,42 @@
-### Pytorch_YOLOV3 <br>
+## Pytorch_YOLOV3 from COCO scratch <br>
+
+### upgrade version 7 2023-08-09
+I found why the training before is slowly and can not merge finally, it is very simple to understand.
+
+I used the **torch.mean** to calculate the loss of non_confidence before, so it loss decrease very slowly and the derivation or the gradient backpropagation is slowly, the non_confidence gradient backpropagation will multiply the $\frac{1}{number~of~non\_confidence}$, the gradient will be very very small, the non_confidence loss work for nothing. using torch.mean need so many epoch to training and nonconf can not be trained, the real training epoch is little. so the negative confidence or non confidence can not be trained. the recall is low and precision is low.
+
+but the training codes and model is correct.
+
+##### Things different
+
+I write several different loss calculation function with torch.sum instead of mean and use yolov3-tiny network to training, it is training in gpu server with multi gpu cards, it needs much money for renting it, so I train very little epoch and use small batchsize to saving money without adjust hyper_params. The training result is very good compared with before.
+
+those references are [darknet_yolov3 https://github.com/AlexeyAB/darknet](https://github.com/AlexeyAB/darknet), [darknet https://github.com/pjreddie/darknet](https://github.com/pjreddie/darknet), [yolov* https://github.com/ultralytics](https://github.com/ultralytics). Considering the reference, those loss functions are:
+
+the **calculate_losses_darknet** training is not stable so using the ciou loss to replace the coordinates loss for now. it is the **calculate_losses_darknetRevise**, the correspondding web is https://github.com/pjreddie/darknet.
+
+the **calculate_losses_Alexeydarknet** is corresponding to https://github.com/pjreddie/darknet.
+
+the **calculate_losses_yolofive** is corresponding to https://github.com/ultralytics
+
+the **calculate_losses_20230730** is writed by myself, it use iou to choose anchor and calculate the loss. I add the num_scale to balance different categories, and the iou scale to balance the difference anchor or prediction loss.
+
+you can find those files in the models directory.
+
+```
+calculate_losses_darknetRevise(...)
+calculate_losses_darknet(...)
+calculate_losses_Alexeydarknet(...)
+...
+calculate_losses_yolofive(...)
+calculate_losses_20230730(...)
+...
+```
+the training result with 
+
+-------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------
 ### upgrade version 6 2022-11-13 
 
 Maybe I know the reason why the mAP of validation dataset is so slow in version3 2022-09
@@ -60,6 +98,7 @@ python predict.py
 <br>
 
 ## Reference
+[https://github.com/pjreddie/darknet](https://github.com/pjreddie/darknet)<br>
 [https://github.com/Peterisfar/YOLOV3](https://github.com/Peterisfar/YOLOV3)<br>
 [https://github.com/AlexeyAB/darknet](https://github.com/AlexeyAB/darknet)<br>
 [https://github.com/qqwweee/keras-yolo3](https://github.com/qqwweee/keras-yolo3)<br>
