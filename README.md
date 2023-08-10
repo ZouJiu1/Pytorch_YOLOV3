@@ -32,7 +32,7 @@ calculate_losses_yolofive(...)
 calculate_losses_20230730(...)
 ...
 ```
-the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch without pretrained model and witout data augmentation
+the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch without pretrained model and without data augmentation
 
 <img src='.\images\0.jpg' width = 100%/>
 <img src='.\images\1.jpg' width = 100%/>
