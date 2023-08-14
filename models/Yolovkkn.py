@@ -19,308 +19,250 @@ import torch.nn.functional as F
 
 from models.layer_yolo import yololayer
 
-class inputnet(nn.Module):
-    def __init__(self):
-        super(inputnet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3, padding=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(32)
-
-        self.conv2 = nn.Conv2d(32, 64, 3, stride=2, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(64)
-
-        self.leaky_relu0 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-
+class ConvBlock_LN(nn.Module):
+    def __init__(self, inc, ouc, kernel_size, stride, padding=0, groups = 1, bias = True, act = True):
+        super(ConvBlock_LN, self).__init__()
+        self.silu = nn.SiLU()
+        self.conv = nn.Conv2d(inc, ouc, kernel_size, stride, padding, groups=groups, bias=bias)
+        self.bn = nn.BatchNorm2d(ouc)
+        self.act = act
+        
     def forward(self, x):
-       x = self.leaky_relu0(self.norm1(self.conv1(x)))
-       x = self.leaky_relu1(self.norm2(self.conv2(x)))
-       return x
-
-class resblock1(nn.Module):
-    def __init__(self):
-        super(resblock1, self).__init__()
-        self.conv1 = nn.Conv2d(64, 32, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(32)
-
-        self.conv2 = nn.Conv2d(32, 64, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(64)
-
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu3 = nn.LeakyReLU(negative_slope=0.1)
-        # self.relu = nn.ReLU()
-
-        self.conv_extra = nn.Conv2d(64, 128, 3, stride=2, padding=1, bias=True)
-        self.norm_extra = nn.BatchNorm2d(128)
-
-    def forward(self, x):
-        y = self.leaky_relu1(self.norm1(self.conv1(x)))
-        y = self.leaky_relu2(self.norm2(self.conv2(y)))
-        y = x + y
-        y = self.leaky_relu3(self.norm_extra(self.conv_extra(y)))
-
-        return y
-
-class resblock2_child(nn.Module):
-    def __init__(self):
-        super(resblock2_child, self).__init__()
-        self.conv1 = nn.Conv2d(128, 64, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(64)
-
-        self.conv2 = nn.Conv2d(64, 128, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(128)
-
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        #self.relu = nn.ReLU()
-
-    def forward(self, x):
-        y = self.leaky_relu1(self.norm1(self.conv1(x)))
-        y = self.leaky_relu2(self.norm2(self.conv2(y)))
-        y = x + y
-        return y
-
-class resblock2(nn.Module):
-    def __init__(self):
-        super(resblock2, self).__init__()
-        self.resblock2_child = nn.ModuleList([resblock2_child() for i in range(2)])
-        self.conv_extra = nn.Conv2d(128, 256, 3, stride=2, padding=1, bias=True)
-        self.norm_extra = nn.BatchNorm2d(256)
-        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
-
-    def forward(self, x):
-        for i, rb2 in enumerate(self.resblock2_child):
-            x = rb2(x)
-        x = self.leaky_relu(self.norm_extra(self.conv_extra(x)))
+        if self.act:
+            x = self.silu(self.bn(self.conv(x)))
+        else:
+            x = self.bn(self.conv(x))
         return x
 
-class resblock3_child(nn.Module):
-    def __init__(self):
-        super(resblock3_child, self).__init__()
-        self.conv1 = nn.Conv2d(256, 128, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(128)
+def autopad(k, p=None, d=1):  # kernel, padding, dilation
+    """Pad to 'same' shape outputs."""
+    if d > 1:
+        k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+    if p is None:
+        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
+    return p
 
-        self.conv2 = nn.Conv2d(128, 256, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(256)
+class Conv(nn.Module):
+    """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)."""
+    default_act = nn.SiLU()  # default activation
 
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        #self.relu = nn.ReLU()
-
-    def forward(self, x):
-        y = self.leaky_relu1(self.norm1(self.conv1(x)))
-        y = self.leaky_relu2(self.norm2(self.conv2(y)))
-        y = x + y
-        return y
-
-class resblock3(nn.Module):
-    def __init__(self):
-        super(resblock3, self).__init__()
-        self.resblock3_child = nn.ModuleList([resblock3_child() for i in range(8)])
-        self.conv_extra = nn.Conv2d(256, 512, 3, stride=2, padding=1, bias=True)
-        self.norm_extra = nn.BatchNorm2d(512)
-        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+        """Initialize Conv layer with given arguments including activation."""
+        super().__init__()
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
 
     def forward(self, x):
-        for i, rb2 in enumerate(self.resblock3_child):
-            x = rb2(x)
-        y = self.leaky_relu(self.norm_extra(self.conv_extra(x)))
-        return x,y
+        """Apply convolution, batch normalization and activation to input tensor."""
+        return self.act(self.bn(self.conv(x)))
 
-class resblock4_child(nn.Module):
-    def __init__(self):
-        super(resblock4_child, self).__init__()
-        self.conv1 = nn.Conv2d(512, 256, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(256)
+    def forward_fuse(self, x):
+        """Perform transposed convolution of 2D data."""
+        return self.act(self.conv(x))
 
-        self.conv2 = nn.Conv2d(256, 512, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(512)
+class Bottleneck(nn.Module):
+    """Standard bottleneck."""
 
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        #self.relu = nn.ReLU()
-
-    def forward(self, x):
-        y = self.leaky_relu1(self.norm1(self.conv1(x)))
-        y = self.leaky_relu2(self.norm2(self.conv2(y)))
-        y = x + y
-        return y
-
-class resblock4(nn.Module):
-    def __init__(self):
-        super(resblock4, self).__init__()
-        self.resblock4_child = nn.ModuleList([resblock4_child() for i in range(8)])
-        self.conv_extra = nn.Conv2d(512, 1024, 3, stride=2, padding=1, bias=True)
-        self.norm_extra = nn.BatchNorm2d(1024)
-        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):  # ch_in, ch_out, shortcut, groups, kernels, expand
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
 
     def forward(self, x):
-        for i, rb2 in enumerate(self.resblock4_child):
-            x = rb2(x)
-        y = self.leaky_relu(self.norm_extra(self.conv_extra(x)))
-        return x, y
+        """'forward()' applies the YOLOv5 FPN to input data."""
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
-class resblock5_child(nn.Module):
-    def __init__(self):
-        super(resblock5_child, self).__init__()
-        self.conv1 = nn.Conv2d(1024, 512, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(512)
+class C2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
-        self.conv2 = nn.Conv2d(512, 1024, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(1024)
-
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
 
     def forward(self, x):
-        y = self.leaky_relu1(self.norm1(self.conv1(x)))
-        y = self.leaky_relu2(self.norm2(self.conv2(y)))
-        y = x + y
-        return y
+        """Forward pass through C2f layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
 
-class resblock5(nn.Module):
-    def __init__(self):
-        super(resblock5, self).__init__()
-        self.resblock5_child = nn.ModuleList([resblock5_child() for i in range(4)])
+    def forward_split(self, x):
+        """Forward pass using split() instead of chunk()."""
+        y = list(self.cv1(x).split((self.c, self.c), 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
 
-    def forward(self, x):
-        for i, rb2 in enumerate(self.resblock5_child):
-            x = rb2(x)
-        return x
-
-class header_block(nn.Module):
-    def __init__(self, num_classes, beginchannel, channel, upornot=True):
-        super(header_block, self).__init__()
-        self.upornot = upornot
-        self.conv1 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(channel)
-        self.conv2 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(beginchannel)
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu3 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu4 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu5 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu6 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu66 = nn.LeakyReLU(negative_slope=0.1)
-        self.conv3 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm3 = nn.BatchNorm2d(channel)
-        self.conv4 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm4 = nn.BatchNorm2d(beginchannel)
-        self.conv5 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm5 = nn.BatchNorm2d(channel)
-
-        #yolo1,接conv5
-        self.conv7 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm7 = nn.BatchNorm2d(beginchannel)
-        self.conv8 = nn.Conv2d(beginchannel, (5+num_classes)*3, 1, stride=1, bias=True)
-        # self.relu = nn.ReLU()
-
-        #upsample,接conv5
-        self.conv9 = nn.Conv2d(channel, channel//2, 1, stride=1, bias=True)
-        self.norm9 = nn.BatchNorm2d(channel//2)
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear')
+class C3(nn.Module):
+    # CSP Bottleneck with 3 convolutions
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
     def forward(self, x):
-        x = self.leaky_relu1(self.norm1(self.conv1(x)))
-        x = self.leaky_relu2(self.norm2(self.conv2(x)))
-        x = self.leaky_relu3(self.norm3(self.conv3(x)))
-        x = self.leaky_relu4(self.norm4(self.conv4(x)))
-        x = self.leaky_relu5(self.norm5(self.conv5(x)))
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
-        y3 = self.leaky_relu6(self.norm7(self.conv7(x)))
-        y3 = self.conv8(y3)
-        up3 = self.leaky_relu66(self.norm9(self.conv9(x)))
-        up3 = self.upsample(up3)
-        return up3, y3
+class SPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
 
-
-class header_block_finally(nn.Module):
-    def __init__(self, num_classes, beginchannel, channel, upornot=True):
-        super(header_block_finally, self).__init__()
-        self.upornot = upornot
-        self.conv1 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm1 = nn.BatchNorm2d(channel)
-        self.conv2 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm2 = nn.BatchNorm2d(beginchannel)
-        self.leaky_relu1 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu2 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu3 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu4 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu5 = nn.LeakyReLU(negative_slope=0.1)
-        self.leaky_relu6 = nn.LeakyReLU(negative_slope=0.1)
-        self.conv3 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm3 = nn.BatchNorm2d(channel)
-        self.conv4 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm4 = nn.BatchNorm2d(beginchannel)
-        self.conv5 = nn.Conv2d(beginchannel, channel, 1, stride=1, bias=True)
-        self.norm5 = nn.BatchNorm2d(channel)
-
-        #yolo1,接conv5
-        self.conv7 = nn.Conv2d(channel, beginchannel, 3, stride=1, padding=1, bias=True)
-        self.norm7 = nn.BatchNorm2d(beginchannel)
-        self.conv8 = nn.Conv2d(beginchannel, (5+num_classes)*3, 1, stride=1, bias=True)
+    def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
+        super().__init__()
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
     def forward(self, x):
-        x = self.leaky_relu1(self.norm1(self.conv1(x)))
-        x = self.leaky_relu2(self.norm2(self.conv2(x)))
-        x = self.leaky_relu3(self.norm3(self.conv3(x)))
-        x = self.leaky_relu4(self.norm4(self.conv4(x)))
-        x = self.leaky_relu5(self.norm5(self.conv5(x)))
-
-        y3 = self.leaky_relu6(self.norm7(self.conv7(x)))
-        y3 = self.conv8(y3)
-        return y3
-
-class yolov3_backbone(nn.Module):
+        """Forward pass through Ghost Convolution block."""
+        x = self.cv1(x)
+        y1 = self.m(x)
+        y2 = self.m(y1)
+        return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
+    
+class yolovkkn_backbone(nn.Module):
     def __init__(self, num_classes):
-        super(yolov3_backbone, self).__init__()
-        self.num_classes = num_classes
-        self.net = inputnet()
-        self.ResBlock1 = resblock1()
-        self.ResBlock2 = resblock2()
-        self.ResBlock3 = resblock3()
-        self.ResBlock4 = resblock4()
-        self.ResBlock5 = resblock5()
-
-        self.hb3 = header_block(self.num_classes, 1024, 512, upornot=True) #r3.size()[1] 第二个参数  最深层
-        self.hb2 = header_block(self.num_classes, 768, 256, upornot=True) #r2up.size()[1] 第二个参数  中等层
-        self.hb1 = header_block_finally(self.num_classes, 384, 128, upornot=False) #r1up.size()[1] 第二个参数  最浅层
-
+        super(yolovkkn_backbone, self).__init__()
+        self.cv0 = nn.Sequential(
+                    ConvBlock_LN(3, 32, 6, 2, 2),
+                    ConvBlock_LN(32, 32*2, 3, 2, 1),
+                    C3(32*2, 32*2, 1, shortcut = True),
+                    ConvBlock_LN(32*2, 32*2*2, 3, 2, 1),
+                    C3(32*2*2, 32*2*2, 2, shortcut = True),
+                    )
+        self.cv1 = nn.Sequential(
+                    ConvBlock_LN(128, 128*2, 3, 2, 1),
+                    C3(128*2, 128*2, 3, shortcut = True),
+                    )
+        self.cv2 = nn.Sequential(
+                    ConvBlock_LN(128*2, 128*2*2, 3, 2, 1),
+                    C3(128*2*2, 128*2*2, 1, shortcut = True),
+                    SPPF(128*2*2, 128*2*2),
+                    ConvBlock_LN(128*2*2, 128*2, 1, 1, 0),
+                    )
+        self.up0 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear')
+        
+        self.c2f0 = nn.Sequential(C3(512, 128*2, 1), ConvBlock_LN(128*2, 128, 1, 1, 0),)
+        self.c2f1 = C3(256, 128, 1)
+        self.c2f2 = C3(256, 256, 1)
+        self.c2f3 = C3(512, 512, 1)
+        self.out0 = ConvBlock_LN(128, (5 + num_classes)*3, 1, 1, 0, act = False)
+        self.out1 = ConvBlock_LN(256, (5 + num_classes)*3, 1, 1, 0, act = False)
+        self.out2 = ConvBlock_LN(512, (5 + num_classes)*3, 1, 1, 0, act = False)
+        self.y1_con = ConvBlock_LN(128, 128, 3, 2, 1)
+        self.y2_con = ConvBlock_LN(256, 256, 3, 2, 1)
+    
     def forward(self, x):
-        r = self.net(x)
-        r = self.ResBlock1(r)
-        r = self.ResBlock2(r)
-        upy1, r1  = self.ResBlock3(r)
-        upy2, r2 = self.ResBlock4(r1)
-        r3 = self.ResBlock5(r2)
+        y0 = self.cv0(x)
+        y1 = self.cv1(y0)
+        y2 = self.cv2(y1)
         
-        #进入header层并上采样    大目标  特征图缩放尺度大网络深，特征图本身尺寸小 16x16
-        up3, y3 = self.hb3(r3) #y3 [2, 255, 16, 16]
-
-        #进入header层并上采样    中等的目标  特征图缩放尺度中等网络中部，特征图本身尺寸中等 32x32
-        r2up = torch.cat([up3, upy2], dim=1)
-        up2, y2 = self.hb2(r2up) #y2 [2, 255, 32, 32]
-
-        #进入header层    小目标  特征图缩放尺度小网络浅层，特征图本身尺寸大 64x64
-        r1up = torch.cat([up2, upy1], dim=1)
-        y1 = self.hb1(r1up) #y1 [2, 255, 64, 64]
+        y1 = self.c2f0(torch.cat([y1, self.up0(y2)], dim = 1))
+        y0 = self.c2f1(torch.cat([y0, self.up1(y1)], dim = 1))
+        y1 = self.c2f2(torch.cat([y1, self.y1_con(y0)], dim = 1))
+        y2 = self.c2f3(torch.cat([y2, self.y2_con(y1)], dim = 1))
+        y2_out = self.out2(y2)
+        y1_out = self.out1(y1)
+        y0_out = self.out0(y0)
         
-        return y1, y2, y3                 ##  small obj       middle obj         big obj
+        return y0_out, y1_out, y2_out  ##  small obj       middle obj         big obj
 
-class Yolov3Net(nn.Module):
+# class yolovkkn_backbone(nn.Module):
+#     def __init__(self, num_classes):
+#         super(yolovkkn_backbone, self).__init__()
+#         self.cv0 = nn.Sequential(
+#                     ConvBlock_LN(3, 16, 3, 2, 1),
+#                     ConvBlock_LN(16, 32, 3, 2, 1),
+#                     C2f(32, 32, 1, shortcut = True),
+#                     ConvBlock_LN(32, 32*2, 3, 2, 1),
+#                     C2f(32*2, 32*2, 2, shortcut = True),
+#                     )
+#         self.cv1 = nn.Sequential(
+#                     ConvBlock_LN(32*2, 128, 3, 2, 1),
+#                     C2f(128, 128, 2, shortcut = True),
+#                     )
+#         self.cv2 = nn.Sequential(
+#                     ConvBlock_LN(128, 128*2, 3, 2, 1),
+#                     C2f(128*2, 128*2, 1, shortcut = True),
+#                     SPPF(128*2, 128*2),
+#                     )
+#         self.up0 = nn.Upsample(scale_factor=2, mode='bilinear')
+#         self.up1 = nn.Upsample(scale_factor=2, mode='bilinear')
+        
+#         self.c2f0 = C2f(360 + 20 + 2*2, 128, 1)
+#         self.c2f1 = C2f(192, 32*2, 1)
+#         self.c2f2 = C2f(192, 128, 1)
+#         self.c2f3 = C2f(360 + 20 + 2*2, 256, 1)
+#         self.connect00 = nn.Sequential(
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect01 = nn.Sequential(
+#                         ConvBlock_LN(32*2, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.connect10 = nn.Sequential(
+#                         ConvBlock_LN(128, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect11 = nn.Sequential(
+#                         ConvBlock_LN(128, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.connect20 = nn.Sequential(
+#                         ConvBlock_LN(128*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect21 = nn.Sequential(
+#                         ConvBlock_LN(128*2, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.y1_con = ConvBlock_LN(32*2, 32*2, 3, 2, 1)
+#         self.y2_con = ConvBlock_LN(128, 128, 3, 2, 1)
+    
+#     def forward(self, x):
+#         y0 = self.cv0(x)
+#         y1 = self.cv1(y0)
+#         y2 = self.cv2(y1)
+        
+#         k = self.up0(y2)
+#         y1 = self.c2f0(torch.cat([y1, self.up0(y2)], dim = 1))
+#         y0 = self.c2f1(torch.cat([y0, self.up1(y1)], dim = 1))
+#         y1 = self.c2f2(torch.cat([y1, self.y1_con(y0)], dim = 1))
+#         y2 = self.c2f3(torch.cat([y2, self.y2_con(y1)], dim = 1))
+#         y2_out = torch.cat([self.connect20(y2), self.connect21(y2)], dim = 1)
+#         y1_out = torch.cat([self.connect10(y1), self.connect11(y1)], dim = 1)
+#         y0_out = torch.cat([self.connect00(y0), self.connect01(y0)], dim = 1)
+        
+#         return y0_out, y1_out, y2_out  ##  small obj       middle obj         big obj
+        
+class YolovKKNet(nn.Module):
     def __init__(self, num_classes, anchors, device, imgsize):
-        super(Yolov3Net, self).__init__()
+        super(YolovKKNet, self).__init__()
         self.num_classes = num_classes
         self.device = device
         self.imgsize = imgsize
         self.anchors = anchors
         self.yolo = [yololayer(self.device, len(self.anchors[0]), self.num_classes) for _ in range(len(anchors))]
         self.anchors_sparse = [torch.tensor(anchors[i]).float().view(-1, 2).view(1, -1, 1, 1, 2).to(device) for i in range(len(anchors))]
-        self.yolov3Net_backbone = yolov3_backbone(num_classes)
+        self.yolovKKNet_backbone = yolovkkn_backbone(num_classes)
 
     def forward(self, x):
-        out = self.yolov3Net_backbone(x)                   #            [small obj   middle obj   big obj]
+        out = self.yolovKKNet_backbone(x)                   #            [small obj   middle obj   big obj]
         prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize) for i in range(len(out))]
         if self.training:
             return prediction # prediction, anchors

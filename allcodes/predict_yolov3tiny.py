@@ -27,9 +27,10 @@ def evalvalid(model, ):
     pass
 
 def predict_batch():
-    pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\2023-08-08yolov3tiny_Alexay_mse\model_e90_map[0.29948__0.095652]_l472.448_2023-08-08.pth'
-    imgpath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\val.txt'
-    savepath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\images\yolov3tiny'
+    # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/datas/val.txt'
+    # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
+    imgpath = r"/root/project/Pytorch_YOLOV3/datas/val.txt"
+    savepath = r'/root/project/Pytorch_YOLOV3/images/yolovtiny'
     os.makedirs(savepath, exist_ok = True)
     # pretrainedmodel=r'C:\Users\ZouJiu\Desktop\Pytorch_YOLOV3\log\yolov3tiny\2023-04-15yflight\model_e2_t9624_map[0.02532625_0.0013636 ]_l0.126_2023-04-15.pth'
     # imgpath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\datas\valid\valid.txt'
@@ -42,12 +43,6 @@ def predict_batch():
         state_dict = torch.load(pretrainedmodel,map_location=torch.device('cuda'))
     else:
         state_dict = torch.load(pretrainedmodel,map_location=torch.device('cpu'))
-    kkk = {}
-    for key, value in state_dict['state_dict'].items():
-        kkk[key.replace("module.", "")] = value
-    state_dict['state_dict'] = kkk
-    pretrained = state_dict['state_dict']
-    model.load_state_dict(pretrained, strict=True)
     model.load_state_dict(state_dict['state_dict'], strict=True)
 
     # pretrained = loadtorchmodel(pretrainedmodel)
@@ -60,8 +55,7 @@ def predict_batch():
             i = i.strip()
             lis.append(i)
 
-    inpth = r'F:\COCOIMAGE\coco\images\val201#'
-    # inpth = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\logs'
+    inpth = r'/root/autodl-tmp/val2017'
     lis=[os.path.join(inpth, i) for i in os.listdir(inpth)]
 
     np.random.seed(999)

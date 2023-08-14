@@ -9,13 +9,13 @@ abspath = abspath.replace(filename, "")
 import sys
 sys.path.append(abspath)
 
-from config.config_yolov3_20230727 import *
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1'
+from config.config_yolovKKn import *
+os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2,3,4,5'
 
 import time
 import torch
 import numpy as np
-from models.Yolov3_20230727 import Yolov3Net
+from models.Yolovkkn import YolovKKNet
 from models.layer_loss import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
     calculate_losses_darknetRevise, calculate_losses_20230730, calculate_losses_yolofive_original
 import torch.optim as optim
@@ -44,6 +44,7 @@ def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
         lr = (baselr / steps0) * stepiters
         xi = [0, steps0]
         ni = stepiters
+        #https://github.com/ultralytics/yolov5/blob/master/train.py#L301
         # accumulate = max(1, np.interp(ni, xi, [1, nbk / batch_size]).round())
         for j, x in enumerate(optimizer.param_groups):
             # x['lr'] = (0.01 / (len(train_loader) * 3)) * steps
@@ -109,8 +110,10 @@ def trainer():
     export NCCL_DEBUG=INFO
     NCCL_SOCKET_IFNAME=eth1  # 网卡名称更换您自己的
     NCCL_DEBUG=WARN
-    python -m torch.distributed.launch --nproc_per_node=3 --nnodes=1 --node_rank=0 --master_addr="172.17.0.2" --master_port=55568 allcodes/train_yolov3_20230727_distribute.py
-    python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="172.17.0.2" --master_port=55568 allcodes/train_yolov3_20230727_distribute.py
+    python -m torch.distributed.launch --nproc_per_node=3 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolovkkn_distribute.py
+    python -m torch.distributed.launch --nproc_per_node=6 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolovkkn_distribute.py
+    python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolovkkn_distribute.py
+    e: \d\d, r:99.
     '''
     # https://pytorch.org/docs/stable/distributed.html#launch-utility
     # https://pytorch.org/tutorials/intermediate/ddp_tutorial.html
@@ -153,7 +156,7 @@ def trainer():
 
     if rank == 0:
         flogs = open(logfile, 'w')
-    model = Yolov3Net(num_classes, anchors, devicenow, inputwidth)
+    model = YolovKKNet(num_classes, anchors, devicenow, inputwidth)
     # yolov3 = Yolov3().to(self.devicenow)
     # print(model)
     if rank == 0:
@@ -166,8 +169,9 @@ def trainer():
     if not os.path.exists(pretrainedmodel) or os.path.isdir(pretrainedmodel):
         print('the pretrainedmodel do not exists %s'%pretrainedmodel)
     elif pretrainedmodel and os.path.exists(pretrainedmodel) and not load_darknet_w:
-        print('loading pretrained model: ', pretrainedmodel)
-
+        if rank == 0:
+            print('loading pretrained model: ', pretrainedmodel)
+        
         # pretrained = loadtorchmodel(pretrainedmodel)
         # model.load_state_dict(pretrained, strict = False)
         # del pretrained
@@ -187,9 +191,12 @@ def trainer():
             alliters = state_dict['alliters']
             nowepoch = state_dict['nowepoch']
         del state_dict
-        print('loading complete')
+        if rank == 0:
+            print('loading complete')
+    
     elif not os.path.exists(pretrainedmodel) and not load_darknet_w:
-        print('file not found, there is no pretrained model, train from scratch')
+        if rank == 0:
+            print('file not found, there is no pretrained model, train from scratch')
 
     # alliters = 0
     # nowepoch = 0
@@ -203,14 +210,12 @@ def trainer():
     # Convert BatchNorm to SyncBatchNorm. 
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.to(devicenow)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank) #, find_unused_parameters=True)
+    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
     # params = model.parameters() # [p for p in model.parameters() if p.requires_grad]
     # if Adam:
     #     optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
     # else:
-    
-    # pg0, pg1, pg2 = [], [], []
     optimizer = smart_optimizer(model, 'SGD', lr = learning_rate, momentum=momnetum, decay=weight_decay)
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
 
@@ -229,7 +234,8 @@ def trainer():
     #                                                gamma=0.1)
     # validloader = DataLoader(validdata, batch_size=1,shuffle=True, num_workers=1)
     start = time.time()
-    print('Using {} device'.format(devicenow))
+    if rank == 0:
+        print('Using {} device'.format(devicenow))
     length = len(dataloader)
     if rank == 0:
         flogs.write('Using {} device'.format(devicenow)+'\n')
@@ -247,11 +253,17 @@ def trainer():
     amp = True
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
+# '''\nepoch: {}, ratio:{:.2f}%, iteration: {}, alliters: {}, lr: {:.3f}, MSE loss: {:.3f}, Class loss: {:.3f}, \
+# # Confi loss: {:.3f}, iouloss: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}'''
+    if rank == 0:
+        print(('\n' + '%9s' * (6 + 6 + 2)) % ('Epoch', 'ratio', 'iter', 'alliter', 'lr', 'Class_L', 'Confi_L', "iouL", "Loss", "avgl", \
+            "iounow", "Confi", "NO_Confi", "Class"))
+    nb = len(dataloader)  # number of batches
     for epoch in range(1, num_epochs + 1):
-        if rank == 0:
-            flogs.write('Epoch {}/{}'.format(epoch, num_epochs)+'\n')
-            print('Epoch {}/{}'.format(epoch, num_epochs))
-            print('-'*10)
+        # if rank == 0:
+        #     flogs.write('Epoch {}/{}'.format(epoch, num_epochs)+'\n')
+        #     print('Epoch {}/{}'.format(epoch, num_epochs))
+        #     print('-'*10)
         running_loss = 0
         if epoch<=nowepoch:
             stepiters += len(dataloader)
@@ -263,13 +275,16 @@ def trainer():
 
         dataloader.sampler.set_epoch(epoch)
         lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
-        if epoch <= warmepoch:
-            optimizer.momentum = warmup_momnetum
-        elif epoch == warmepoch + 1:
+        if epoch == warmepoch + 1:
             optimizer.momentum = momnetum
         # preiou = 0
-        for i, (image, labels, _) in enumerate(dataloader):
-        # for i, (image, labels, _) in enumerate(tqdm.tqdm(dataloader, desc=f"Training Epoch {epoch}/{num_epochs}")):
+        pbar = enumerate(dataloader)
+        if rank==0:
+            TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'  # tqdm bar format
+            pbar = tqdm.tqdm(pbar, total=nb, bar_format=TQDM_BAR_FORMAT)
+        # for i, (image, labels, _) in enumerate(dataloader):
+        for i, (image, labels, _) in pbar:
+        # for i, (image, labels, _) in enumerate(tqdm.tqdm(dataloader, desc=f"{epoch}/{num_epochs}", mininterval=3)):
             stepiters += 1
             # if stepiters < alliters:
             #     continue
@@ -295,10 +310,10 @@ def trainer():
                     #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
                     # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
                     #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                                                                                        # bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
                                                                                         bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
                     # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
                     #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
 
@@ -348,8 +363,12 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
                                     float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
                                         epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item())
             # if i%subsiz==0 or i == len(dataloader) - 1:
-            if rank == 0 and i%60==0:
-                print(logword)
+            if rank == 0 and i%1==0:
+                # print(logword)
+                pbar.set_description(('%9s'+'%9.5g'+"%9s"+"%9s"+ '%9.5g' * 10) %
+                                     (epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], \
+                                    float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
+                                        epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item()))
                 flogs.write(logword+'\n')
 
         if rank == 0 and epoch==num_epochs:

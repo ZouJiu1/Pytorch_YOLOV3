@@ -16,9 +16,10 @@ import time
 import torch
 import numpy as np
 from models.Yolov3tiny import yolov3tinyNet
-from models.layer_loss import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, calculate_losses_darknetRevise, calculate_losses_20230730
+from models.layer_loss import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
+    calculate_losses_darknetRevise, calculate_losses_20230730, calculate_losses_yolofive_original
 import torch.optim as optim
-from utils.common import cvshow_, collate_fn, provide_determinism
+from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer
 from utils.validation_yolov3tiny import validation_map
 from torch.utils.data import Dataset, DataLoader
 from loaddata.cocoread import trainDataset
@@ -31,14 +32,28 @@ import tqdm
 import torch.multiprocessing as mp
 # # torch.autograd.set_detect_anomaly(True)
 
-def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, Adam, freeze_backbone, \
-              momnetum, learning_rate, model, weight_decay):
-    steps0 = num_batch * warmepoch - 1
+def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
+              momnetum, learning_rate):
+    steps0 = num_batch * warmepoch
     final_lr = 0.01
     baselr = learning_rate
+    nbk = 2**6  # nominal batch size
+    lf = lambda k : 1 + ((final_lr - 1) / (num_epochs - 1)) * (k - 1)
     if epoch <= warmepoch:
         # lr = baselr * np.exp(stepiters * 6 / steps0 - 6)
         lr = (baselr / steps0) * stepiters
+        xi = [0, steps0]
+        ni = stepiters
+        # accumulate = max(1, np.interp(ni, xi, [1, nbk / batch_size]).round())
+        for j, x in enumerate(optimizer.param_groups):
+            # x['lr'] = (0.01 / (len(train_loader) * 3)) * steps
+            # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+            warmup_bias_lr = baselr * 10
+            x['lr'] = np.interp(ni, xi, [warmup_bias_lr if j == 0 else 0.0, baselr * lf(epoch)])
+            if 'momentum' in x:
+                x['momentum'] = np.interp(ni, xi, [warmup_momnetum, momnetum])
+        return optimizer.param_groups[0]['lr']
+
     elif epoch < (num_epochs*(8/10)):
         lr = baselr
     elif epoch < (num_epochs*(9/10)):
@@ -96,11 +111,13 @@ def trainer():
     NCCL_DEBUG=WARN
     python -m torch.distributed.launch --nproc_per_node=3 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolov3tiny_distribute.py
     python -m torch.distributed.launch --nproc_per_node=6 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolov3tiny_distribute.py
+    python -m torch.distributed.launch --nproc_per_node=5 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=666 allcodes/train_yolov3tiny_distribute.py
     e: \d\d, r:99.
     '''
     # https://pytorch.org/docs/stable/distributed.html#launch-utility
     # https://pytorch.org/tutorials/intermediate/ddp_tutorial.html
     os.system("export NCCL_SOCKET_IFNAME=eth0")
+    # os.system("export TORCH_DISTRIBUTED_DEBUG=DETAIL") #DEBUG
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     # WORLD_SIZE = int(os.environ["WORLD_SIZE"])
@@ -151,7 +168,8 @@ def trainer():
     if not os.path.exists(pretrainedmodel) or os.path.isdir(pretrainedmodel):
         print('the pretrainedmodel do not exists %s'%pretrainedmodel)
     elif pretrainedmodel and os.path.exists(pretrainedmodel) and not load_darknet_w:
-        print('loading pretrained model: ', pretrainedmodel)
+        if rank == 0:
+            print('loading pretrained model: ', pretrainedmodel)
         
         # pretrained = loadtorchmodel(pretrainedmodel)
         # model.load_state_dict(pretrained, strict = False)
@@ -196,7 +214,9 @@ def trainer():
     # if Adam:
     #     optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
     # else:
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
+    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=False, weight_decay= weight_decay)
+    optimizer = smart_optimizer(model, 'SGD', lr = learning_rate, momentum=momnetum, decay=weight_decay)
+    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
 
     # if freeze_backbone:       #step1 freeze darknet53 backbone parameters to train, because you data number is small
     #     bre = len([p for p in model.parameters() if p.requires_grad])
@@ -220,13 +240,16 @@ def trainer():
     stepiters = 0
     pre_map = 0
 
-    bce0loss = torch.nn.BCELoss(reduction='sum').to(devicenow)
-    bce1loss = torch.nn.BCELoss(reduction='sum').to(devicenow)
-    bce2loss = torch.nn.BCELoss(reduction='sum').to(devicenow)
-    bcecls = torch.nn.BCELoss(reduction='sum').to(devicenow)
-    bcecof = torch.nn.BCELoss(reduction='sum').to(devicenow)
+    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
+    bce1loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
+    bce2loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
+    bcecls = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
+    bcecof = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
     mseloss = [torch.nn.MSELoss(reduction='sum').to(device) for i in range(2*2)]
     epoch_loss = 0
+
+    amp = True
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
     for epoch in range(1, num_epochs + 1):
         if rank == 0:
@@ -243,7 +266,7 @@ def trainer():
         optimizer.zero_grad()
         
         dataloader.sampler.set_epoch(epoch)
-        lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay)
+        lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
         if epoch <= warmepoch:
             optimizer.momentum = warmup_momnetum
         elif epoch == warmepoch + 1:
@@ -258,47 +281,60 @@ def trainer():
             # cvshow_(image, labels)   #cv2 show inputs images)
             count += 1
             if epoch <= warmepoch:
-                lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay)
+                lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
             
             image = image.to(devicenow)
             labels = labels.to(devicenow)
             
             # try:
-            prediction = model(image)
-            # except Exception as e:
-            #     continue
-            try:
-                # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
-                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
-                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
-                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                                                                                    bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
-                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+            with torch.cuda.amp.autocast(amp):
+                prediction = model(image)
 
-                # loss, loss_components = computeloss(prediction, labels, devicenow, model)
-            except Exception as e:
-                print(e)
-                savestate = {'state_dict':model.state_dict(),\
-                                    'iteration':i,\
-                                    'alliters':stepiters,\
-                                    'nowepoch':epoch}
-                __savepath__ = os.path.join(savepath, datekkk) + prefix
-                os.makedirs(__savepath__, exist_ok=True)
-                torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pth'.format(epoch, epoch_loss))
-                continue
+                # except Exception as e:
+                #     continue
+                try:
+                    # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
+                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
+                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
+                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                        bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                        bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
+                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+
+                    # loss, loss_components = computeloss(prediction, labels, devicenow, model)
+                except Exception as e:
+                    print(e)
+                    savestate = {'state_dict':model.state_dict(),\
+                                        'iteration':i,\
+                                        'alliters':stepiters,\
+                                        'nowepoch':epoch}
+                    __savepath__ = os.path.join(savepath, datekkk) + prefix
+                    os.makedirs(__savepath__, exist_ok=True)
+                    torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pth'.format(epoch, epoch_loss))
+                    continue
             
             # if darknetLoss and i > 30 and iouloss > 10 and iouloss / preiou > 2:
             #     loss = c_l + confi_l
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            # loss.backward()
 
-            optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
+            if rank != -1:
+                # print(WORLD_SIZE)
+                loss *= cudanum  # 6 # gradient averaged between devices in DDP mode
 
+            # optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
+            # optimizer.zero_grad()
+            scaler.unscale_(optimizer)  # unscale gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
+            scaler.step(optimizer)  # optimizer.step
+            scaler.update()
             optimizer.zero_grad()
 
             # preiou = iouloss
@@ -331,16 +367,17 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
             # torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pth'.format(epoch, epoch_loss))
         if rank == 0:
             jkk = []
-            with open(os.path.join(abspath, 'valid.txt'), 'r') as obj:
-                kk = obj.read()
-                kk = kk.strip().split(',')
-                while "" in kk:
-                    kk.remove("")
-                for ki in kk:
-                    try:
-                        jkk.append(int(ki))
-                    except:
-                        pass
+            if os.path.exists(os.path.join(abspath, 'valid.txt')):
+                with open(os.path.join(abspath, 'valid.txt'), 'r') as obj:
+                    kk = obj.read()
+                    kk = kk.strip().split(',')
+                    while "" in kk:
+                        kk.remove("")
+                    for ki in kk:
+                        try:
+                            jkk.append(int(ki))
+                        except:
+                            pass
         if rank == 0 and (epoch in jkk or epoch==num_epochs):
             savestate = {'state_dict':model.state_dict(),\
                             'iteration':i,\

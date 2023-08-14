@@ -163,9 +163,23 @@ class trainDataset(Dataset):
         labels = []
         gt = []
         # print(labelpath, imgpath)
+        
+        # outpath = r'/root/project/Pytorch_YOLOV3/loaddata/saveimg'
+        # cvfont = cv2.FONT_HERSHEY_SIMPLEX
+        
         alllabels = choose[3:]
         for i in range(len(alllabels)):
             label, cx, cy, w, h = alllabels[i]
+            if len(alllabels) > 10 and w > 0.7 and h < 0.7 and label==0:
+                # xmin = int((cx - w/2) * 32*16)
+                # ymin = int((cy - h/2) * 32*16)
+                # xmax = int((cx + w/2) * 32*16)
+                # ymax = int((cy + h/2) * 32*16)
+                # cv2.rectangle(image, (xmin, ymin), (xmax, ymax), [255, 0, 0], 2)
+                # cv2.putText(image, str(label), (xmin, ymin+13), cvfont, 1, [255, 0, 0], 1)
+                # img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                # cv2.imwrite(os.path.join(outpath, str(imageid[0])+".jpg"), img)
+                continue
             # label, cx, cy, w, h = int(label), float(cx), float(cy), float(w), float(h)
             gt.append([0, int(label), cx, cy, w, h])
             bboxes.append([cx, cy, w, h])
@@ -196,22 +210,20 @@ class trainDataset(Dataset):
         return image, torch.tensor(gt), imageid
 
 if __name__ == '__main__':
-    # trainpath = r'D:\backup\programming\dataset\annotations_trainval2017\instances_train2017.json'
-    trainpath = r'/home/featurize/data/COCO2017/annotations_trainval2017/instances_val2017.json'
-    imgpth = r'/home/featurize/data/COCO2017/val2017'
+    # trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
+    # trainpath = r'/root/autodl-tmp/annotations/instances_val2017.json'
+    # imgpth = r'/root/autodl-tmp/train2017'
     inputwidth = 32 * 16
     anchors = [[[10,13], [16,30], [33,23]],\
         [[30,61],  [62,45],  [59,119]],  \
         [[116,90],  [156,198],  [373,326]]]
     strides = [8, 16, 32]
-
     # anchors = np.array(anchors, dtype = np.float32)
     # print(anchors.shape)
     # for i in range(3):
     #     anchors[i, ...] = anchors[i, ...]/strides[i]
     # print(anchors)
     # exit(0)
-
     anchor_per_layer = 3
     num_classes = 2       # voc2007_2012 20
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -219,11 +231,11 @@ if __name__ == '__main__':
     from torch.utils.data import Dataset, DataLoader
     from utils.common import cvshow_, collate_fn
     from config.config_yolov3tiny import TF
-    
+    from tqdm import tqdm
     traindata = trainDataset(trainpath, imgpth, stride = strides, anchors = anchors, \
                              inputwidth = inputwidth, transform=TF)
-    dataloader = DataLoader(traindata, batch_size = 10,shuffle=False, \
-        num_workers=1, collate_fn=collate_fn)
-    for i, (images, labels, imageid) in enumerate(dataloader):
+    dataloader = DataLoader(traindata, batch_size = 100,shuffle=False, \
+        num_workers=30, collate_fn=collate_fn)
+    for i, (images, labels, imageid) in enumerate(tqdm(dataloader)):
         k = 0
-        print(images.size(), labels.size())
+        # print(images.size(), labels.size())

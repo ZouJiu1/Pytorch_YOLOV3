@@ -124,9 +124,7 @@ class yolov3tinyNet(nn.Module):
         self.device = device
         self.imgsize = imgsize
         self.anchors = anchors
-        self.yolo0 = yololayer(self.device, len(self.anchors[0]), self.num_classes)
-        self.yolo1 = yololayer(self.device, len(self.anchors[0]), self.num_classes)
-        self.yolo = [self.yolo0, self.yolo1]
+        self.yolo = [yololayer(self.device, len(self.anchors[0]), self.num_classes) for _ in range(len(anchors))]
         self.anchors_sparse = [torch.tensor(anchors[i]).float().view(-1, 2).view(1, -1, 1, 1, 2).to(device) for i in range(len(anchors))]
         self.yolov3tinyNet_backbone = yolov3tiny_backbone(num_classes)
         # self.yolov3tinyNet_backbone = yolov3tiny_backbone_depthwise(num_classes)

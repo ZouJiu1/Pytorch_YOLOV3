@@ -58,7 +58,7 @@ ignore_thresh = 0.5 #iou>0.7 confidence loss
 iou_thresh = 0.5
 score_thresh = 0.38
 nms_thresh = 0.5
-strides = [16, 32] #[8, 16, 32]
+strides = [8, 16, 32]
 
 TFRESIZE = transforms.Compose([
     transforms.Resize((inputwidth, inputwidth)), 

@@ -3,7 +3,7 @@
 #Time: 2022-12-10
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '-1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 abspath = os.path.abspath(__file__)
 filename = os.sep.join(abspath.split(os.sep)[-2:])
@@ -16,8 +16,9 @@ import time
 import torch
 import datetime
 import numpy as np
-from models.Yolov3tiny import yolov3tinyNet
-from models.layer_loss import calculate_losses_yolov3, calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_20230730, calculate_losses_yolofive, calculate_losses_darknetRevise
+from models.Yolovkkn import YolovKKNet
+from models.layer_loss import calculate_losses_yolov3, calculate_losses_darknet, calculate_losses_Alexeydarknet, \
+        calculate_losses_20230730, calculate_losses_yolofive, calculate_losses_darknetRevise, calculate_losses_yolofive_original
 import torch.optim as optim
 from utils.utils_yolov3tiny import loadtorchmodel
 from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer
@@ -25,10 +26,12 @@ from utils.validation_yolov3tiny import validation_map
 from torch.utils.data import Dataset, DataLoader
 # from loaddata.load_datas_yolov3tiny import trainDataset
 from loaddata.cocoread import trainDataset
-from config.config_yolov3tiny import *
+from config.config_yolovKKn import *
 from multiprocessing import cpu_count
 from utils.evaluate_yolov3tiny import evaluation
 import math
+import onnxsim
+import onnx
 import tqdm
 torch.autograd.set_detect_anomaly(True)
 
@@ -44,6 +47,7 @@ def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
         lr = (baselr / steps0) * stepiters
         xi = [0, steps0]
         ni = stepiters
+        #https://github.com/ultralytics/yolov5/blob/master/train.py#L301
         # accumulate = max(1, np.interp(ni, xi, [1, nbk / batch_size]).round())
         for j, x in enumerate(optimizer.param_groups):
             # x['lr'] = (0.01 / (len(train_loader) * 3)) * steps
@@ -111,7 +115,7 @@ def trainer():
     count_scale = traindata.count_scale.to(device)
 
     flogs = open(logfile, 'w')
-    model = yolov3tinyNet(num_classes, anchors, device, inputwidth)
+    model = YolovKKNet(num_classes, anchors, device, inputwidth)
     # yolov3 = Yolov3().to(self.device)
     print(model)
     flogs.write(str(model)+'\n')
@@ -166,20 +170,20 @@ def trainer():
     #     print('after freeze trainable layer number is: ', bre)
     #     flogs.write('after freeze trainable layer number is: %d\n'%bre)
 
-    params = [p for p in model.parameters() if p.requires_grad]
+    # params = [p for p in model.parameters() if p.requires_grad]
     # if Adam:
     #     optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
     # else:
     optimizer = smart_optimizer(model, 'SGD', lr = learning_rate, momentum=momnetum, decay=weight_decay)
 
-    # optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=False, weight_decay= weight_decay)
+    # optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
     # optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
     # and a learning rate scheduler
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
     #                                                step_size=7,
     #                                                gamma=0.1)
     # num_cpu = cpu_count()
-    num_cpu =  6 # num_cpu if num_cpu < 20 else 13
+    num_cpu =  11 # num_cpu if num_cpu < 20 else 13
     dataloader = DataLoader(traindata, batch_size = batch_size//subsiz,shuffle=True, \
         num_workers=num_cpu, collate_fn=collate_fn, pin_memory=True)
     valdata = trainDataset(pth_evaluate, img_evaluate, stride = strides, anchors = anchors, \
@@ -194,11 +198,11 @@ def trainer():
     stepiters = 0
     pre_map = 0
 
-    bce0loss = torch.nn.BCELoss(reduction='sum').to(device)
-    bce1loss = torch.nn.BCELoss(reduction='sum').to(device)
-    bce2loss = torch.nn.BCELoss(reduction='sum').to(device)
-    bcecls = torch.nn.BCELoss(reduction='sum').to(device)
-    bcecof = torch.nn.BCELoss(reduction='sum').to(device)
+    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bce1loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bce2loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bcecls = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bcecof = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
     mseloss = [torch.nn.MSELoss(reduction='sum').to(device) for i in range(2*2)]
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
     amp = True
@@ -235,71 +239,96 @@ def trainer():
             labels = labels.to(device)
             
             # try:
-            prediction = model(image)
-            # except Exception as e:
-            #     continue
-            
-            # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
-            # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
-            #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-            # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
-            #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-            # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-            #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-            loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                                                                                bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-            # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
-            #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-            
-            # if darknetLoss and i > 30 and iouloss > 10 and iouloss / preiou > 3:
-            #     loss = c_l + confi_l
-
-            # loss.backward()
-            scaler.scale(loss).backward()
-            # loss, loss_components = computeloss(prediction, labels, device, model)
-            losscol.append(loss.detach().cpu().item())
-            
-            # loss.requires_grad_(True)
-            # loss = loss.to(device)
-            # if torch.isnan(loss).item()==False:
-            loss = loss.detach().cpu().item()
-            running_loss += loss
-            preiou = iouloss
-            # else:
-            #     optimizer = adjust_lr(optimizer, 200, epoch, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay, flogs)
-            #     print(torch.isnan(loss).item(), torch.isnan(loss).item()==False)
-            # statistics
-            epoch_loss = running_loss / count
-#             logword = '''\nepoch: {}, ratio:{:.2f}%, iteration: {}, alliters: {}, lr: {:.6f}, MSE loss: {:.6f}, Class loss: {:.3f}, \
-# Confi loss: {:.3f}, iouloss: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}'''.format(
-#                                    epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], float(mse.item()),\
-#                                     float(c_l.item()), float(confi_l.item()), iouloss.item(), loss, epoch_loss)
-            logword = '''\ne: {}, r:{:.2f}%, i: {}, ai: {}, lr: {:.6f}, Class: {:.3f}, \
-Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: {:.3f}, ncof: {:.6f}, cla: {:.3f}'''.format(
-                                   epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], \
-                                    float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
-                                        epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item())
-            if i%subsiz==0 or i == len(dataloader)-1:
-                # optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
-                # optimizer.zero_grad()
-                scaler.unscale_(optimizer)  # unscale gradients
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
-                scaler.step(optimizer)  # optimizer.step
-                scaler.update()
-                optimizer.zero_grad()
+            with torch.cuda.amp.autocast(amp):
+                prediction = model(image)
+                # except Exception as e:
+                #     continue
                 
-                print(logword)
-                flogs.write(logword+'\n')
-                flogs.flush()
+                # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
+                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
+                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
+                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                    bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
+                #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                
+                # if darknetLoss and i > 30 and iouloss > 10 and iouloss / preiou > 3:
+                #     loss = c_l + confi_l
+
+                # loss.backward()
+                scaler.scale(loss).backward()
+                # loss, loss_components = computeloss(prediction, labels, device, model)
+                losscol.append(loss.detach().cpu().item())
+                
+                # loss.requires_grad_(True)
+                # loss = loss.to(device)
+                # if torch.isnan(loss).item()==False:
+                loss = loss.detach().cpu().item()
+                running_loss += loss
+                preiou = iouloss
+                # else:
+                #     optimizer = adjust_lr(optimizer, 200, epoch, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay, flogs)
+                #     print(torch.isnan(loss).item(), torch.isnan(loss).item()==False)
+                # statistics
+                epoch_loss = running_loss / count
+    #             logword = '''\nepoch: {}, ratio:{:.2f}%, iteration: {}, alliters: {}, lr: {:.6f}, MSE loss: {:.6f}, Class loss: {:.3f}, \
+    # Confi loss: {:.3f}, iouloss: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}'''.format(
+    #                                    epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], float(mse.item()),\
+    #                                     float(c_l.item()), float(confi_l.item()), iouloss.item(), loss, epoch_loss)
+                logword = '''\ne: {}, r:{:.2f}%, i: {}, ai: {}, lr: {:.6f}, Class: {:.3f}, \
+    Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: {:.3f}, ncof: {:.6f}, cla: {:.3f}'''.format(
+                                    epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], \
+                                        float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
+                                            epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item())
+                if i%subsiz==0 or i == len(dataloader)-1:
+                    # optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
+                    # optimizer.zero_grad()
+                    scaler.unscale_(optimizer)  # unscale gradients
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
+                    scaler.step(optimizer)  # optimizer.step
+                    scaler.update()
+                    optimizer.zero_grad()
+                    
+                    print(logword)
+                    flogs.write(logword+'\n')
+                    flogs.flush()
+                # break
+
+        __savepath__ = os.path.join(savepath, datekkk) + prefix
+        os.makedirs(__savepath__, exist_ok=True)
+
+        # onnxfil = __savepath__+os.sep+r'model_e{}_t{}_l{:.3f}_{}.onnx'.format(epoch, stepiters, epoch_loss, datekkk)
+        # model.eval()
+        # torch.onnx.export(
+        #     model.cpu(),  # --dynamic only compatible with cpu
+        #     image[0].unsqueeze(0).cpu(),
+        #     onnxfil,
+        #     verbose=False,
+        #     # opset_version=opset,
+        #     do_constant_folding=True,  # WARNING: DNN inference with torch>=1.12 may require do_constant_folding=False
+        #     input_names=['images'],
+        #     output_names=['output0'])
+        # model_onnx = onnx.load(onnxfil)
+        
+        # model_onnx, check = onnxsim.simplify(model_onnx)
+        # assert check, 'assert check failed'
+        # onnx.save(model_onnx, onnxfil)
+
+        model = model.to(device)
         savestate = {'state_dict':model.state_dict(),\
                         'iteration':i,\
                         'alliters':stepiters,\
                         'nowepoch':epoch}
-        __savepath__ = os.path.join(savepath, datekkk) + prefix
-        os.makedirs(__savepath__, exist_ok=True)
         # scheduler.step(np.mean(losscol))
         map, lengthkk = validation_map(model, valdataloader, device)
-        # map = evaluation(model, score_thresh_now = 0.01, nms_thresh_now = 0.3)
+        lengthkk = 2000*2+1000
+        # map = evaluation("", model=model, dataloader=valdataloader, score_thresh_now = 0.001, nms_thresh_now = 0.6)
         print("validation......num_img: {}, mAP: {}, premap:{}".format(lengthkk, map, pre_map))
         if len(map) > 2:
             map = [round(map[0], 6), round(np.mean(map), 6)]

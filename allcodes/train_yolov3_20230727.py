@@ -20,7 +20,7 @@ import numpy as np
 from models.Yolov3_20230727 import Yolov3Net
 from models.layer_loss import calculate_losses_yolov3, calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_20230730, calculate_losses_yolofiveeight
 import torch.optim as optim
-from utils.common import cvshow_, collate_fn, provide_determinism
+from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer
 from utils.validation_yolov3tiny import validation_map
 from torch.utils.data import Dataset, DataLoader
 # from loaddata.load_datas_yolov3tiny import trainDataset
@@ -32,20 +32,40 @@ import math
 import tqdm
 # torch.autograd.set_detect_anomaly(True)
 
-def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, Adam, freeze_backbone, \
-              momnetum, learning_rate, model, weight_decay):
-    steps0 = num_batch * warmepoch - 1
-    final_lr = 0.1
+def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
+              momnetum, learning_rate):
+    steps0 = num_batch * warmepoch
+    final_lr = 0.01
     baselr = learning_rate
+    nbk = 2**6  # nominal batch size
+    lf = lambda k : 1 + ((final_lr - 1) / (num_epochs - 1)) * (k - 1)
     if epoch <= warmepoch:
         # lr = baselr * np.exp(stepiters * 6 / steps0 - 6)
         lr = (baselr / steps0) * stepiters
+        xi = [0, steps0]
+        ni = stepiters
+        # accumulate = max(1, np.interp(ni, xi, [1, nbk / batch_size]).round())
+        for j, x in enumerate(optimizer.param_groups):
+            # x['lr'] = (0.01 / (len(train_loader) * 3)) * steps
+            # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+            warmup_bias_lr = baselr * 10
+            x['lr'] = np.interp(ni, xi, [warmup_bias_lr if j == 0 else 0.0, baselr * lf(epoch)])
+            if 'momentum' in x:
+                x['momentum'] = np.interp(ni, xi, [warmup_momnetum, momnetum])
+        return optimizer.param_groups[0]['lr']
+
+    elif epoch < (num_epochs*(8/10)):
+        lr = baselr
+    elif epoch < (num_epochs*(9/10)):
+        lr = baselr*1e-1
+    else:
+        lr = baselr*1e-2
     # else:
         # lr = ((1 - math.cos(epoch * math.pi / num_epochs)) / 2) * (final_lr - 1) + 1
         # lr = baselr * lr
-    else:
-        lr = 1 + ((final_lr - 1) / (num_epochs - 1)) * (epoch - 1)
-        lr = baselr * lr
+    # else:
+    #     lr = 1 + ((final_lr - 1) / (num_epochs - 1)) * (epoch - 1)
+    #     lr = baselr * lr
 
     # k = []
     # for epoch in range(1, num_epochs+1):
@@ -54,6 +74,15 @@ def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, Adam, freeze_b
     #     k.append(lr)
     # kk = 0
 
+    # elif epoch < num_epochs*2//3:
+    #     lr = baselr
+    # elif epoch < num_epochs * 9//10:
+    #     lr = baselr*1e-1
+    # elif epoch < num_epochs:
+    #     lr = baselr*1e-2
+    # else:
+    #     import sys
+    #     sys.exit(0)
     # if epoch == 10: #unfreeze
     #     for p in model.parameters():
     #         p.requires_grad = True
@@ -145,8 +174,8 @@ def trainer():
     # if Adam:
     #     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
     # else:
-
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
+    optimizer = smart_optimizer(model, 'SGD', lr = learning_rate, momentum=momnetum, decay=weight_decay)
+    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
     # and a learning rate scheduler
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
     #                                                step_size=7,
@@ -174,6 +203,8 @@ def trainer():
     bcecof = torch.nn.BCELoss(reduction='sum').to(device)
     mseloss = [torch.nn.MSELoss(reduction='sum').to(device) for i in range(2*2)]
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
+    amp = True
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
     for epoch in range(1, num_epochs + 1):
         print('Epoch {}/{}'.format(epoch, num_epochs))
         flogs.write('Epoch {}/{}'.format(epoch, num_epochs)+'\n')
@@ -187,7 +218,7 @@ def trainer():
         losscol = []
         optimizer.zero_grad()
 
-        lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay)
+        lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
         if epoch <= warmepoch:
             optimizer.momentum = warmup_momnetum
         elif epoch == warmepoch + 1:
@@ -200,7 +231,7 @@ def trainer():
             # cvshow_(image, labels)   #cv2 show inputs images)
             count += 1
             if epoch <= warmepoch:
-                lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, Adam, freeze_backbone, momnetum, learning_rate, model, weight_decay)
+                lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
             
             image = image.to(device)
             labels = labels.to(device)
@@ -223,7 +254,9 @@ def trainer():
             # loss, loss_components = computeloss(prediction, labels, devicenow, model)
             losscol.append(loss.detach().cpu().item())
 
-            loss.backward()
+            # loss.backward()
+            scaler.scale(loss).backward()
+
             loss = loss.detach().cpu().item()
             running_loss += loss
             epoch_loss = running_loss / count
@@ -236,8 +269,14 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
                                    epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], \
                                     float(c_l.item()), float(confi_l.item()), iouloss.item(), loss, epoch_loss, iounow.item(), cof.item(), ncof.item(), cla.item())
             if i%subsiz==0 or i == len(dataloader)-1:
-                optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
+                # optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
+                # optimizer.zero_grad()
+                scaler.unscale_(optimizer)  # unscale gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
+                scaler.step(optimizer)  # optimizer.step
+                scaler.update()
                 optimizer.zero_grad()
+                
                 print(logword)
                 flogs.write(logword+'\n')
                 flogs.flush()

@@ -25,6 +25,7 @@ class yololayer(nn.Module):
         self.device = device
         self.grid = torch.tensor([[],[]])
         self.no = num_classes + 5
+        self.num_classes = num_classes
         self.num_anchors = num_anchors
         self.result = {}
         # self.sig = nn.Sigmoid()
@@ -50,19 +51,27 @@ class yololayer(nn.Module):
             # print(prediction.size(), self.grid[0].size())
         if self.grid[0].size()[0] != prediction.size()[2]:
             self.grid = self._make_grid(prediction.size()[2], prediction.size()[2]).to(self.device)
-
-        # yololayer_largearea   calculate_losses_darknet
-        prediction[..., 0:2] = (prediction[..., 0:2].sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
-        prediction[..., 2:4] = torch.exp(prediction[..., 2:4]) * anchors #wh #[2, 3, 13, 13, 2]
-        prediction[..., 4:] = prediction[..., 4:].sigmoid()
-        
         # calculate_losses_yolofive
-        # prediction[..., 0:2] = (prediction[..., 0:2].sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
-        # prediction[..., 2:4] = torch.square(prediction[..., 2:4].sigmoid()) * 2 * 2 * anchors #wh #[2, 3, 13, 13, 2]
-        # prediction[..., 4:] = prediction[..., 4:].sigmoid()
+        # if self.grid.device!=prediction.device:
+        #     self.grid = self.grid.to(prediction.device)
+        #     anchors = anchors.to(prediction.device)
+
+        xy, wh, conf = prediction.split((2, 2, self.num_classes + 1), 4)
+        # yololayer_largearea   calculate_losses_darknet        
+        # xy = (xy.sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
+        # wh = torch.exp(wh) * anchors #wh #[2, 3, 13, 13, 2]
+        # if not self.training:
+        #     conf = conf.sigmoid()
+        # prediction = torch.cat((xy, wh, conf), 4)
+        
+        xy = (xy.sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
+        wh = ((wh.sigmoid() * 2)**2 ) * anchors #wh #[2, 3, 13, 13, 2]
+        if not self.training:
+            conf = conf.sigmoid()
+        prediction = torch.cat((xy, wh, conf), 4)
+        
         
         prediction = prediction.view(batch_size, -1, self.no)
-
         return prediction, self.result[height]
 
     def _make_grid(self, nx, ny):
