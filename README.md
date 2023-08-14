@@ -34,7 +34,7 @@ calculate_losses_20230730(...)
 ```
 the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch without pretrained model and without data augmentation
 
-the training result with yolov5s, 7 epoch mAP 16%,  10 epoch 21.2%, train from scratch without pretrained model and without data augmentation 
+**the training result with yolov5s, 7 epoch mAP 16%,  10 epoch 21.2% in val2017, train from scratch without pretrained model and without data augmentation** 
 
 <img src='.\images\0.jpg' width = 100%/>
 <img src='.\images\1.jpg' width = 100%/>
