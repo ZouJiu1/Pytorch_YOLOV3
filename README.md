@@ -10,6 +10,7 @@ but the training codes and model is correct.
 ##### pretrained model
 
 [model_e30_map https://www.aliyundrive.com/s/xVYNAiaa19c 提取码: 16bn](https://www.aliyundrive.com/s/xVYNAiaa19c)
+
 [model_e51_map https://www.aliyundrive.com/s/F7wRTcitbkB 提取码: gn85](https://www.aliyundrive.com/s/F7wRTcitbkB)
 
 ```
@@ -71,7 +72,8 @@ the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch
 the training datast is coco, which website is [https://cocodataset.org/#download](https://cocodataset.org/#download)
 
 ## Tracking
-the tracking result is here: 
+the tracking result is here: waiting for minutes
+
 <img src="./gif.gif" width = "100%" />
 <img src="./gifman.gif" width = "100%" />
 
@@ -82,6 +84,7 @@ python tracking/tracking.py
 
 ### tracking dataset download
 [MVI_39031.zip     https://www.aliyundrive.com/s/PtnZBBf2E2V       提取码: e3q7](https://www.aliyundrive.com/s/PtnZBBf2E2V)
+
 [MOT16-06-raw.webm https://www.aliyundrive.com/s/tUwZH1H5gET       提取码: p50u](https://www.aliyundrive.com/s/tUwZH1H5gET)
 
 -------------------------------------------------------------------------------------------------------------------------------------------
