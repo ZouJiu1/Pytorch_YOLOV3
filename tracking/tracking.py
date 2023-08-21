@@ -79,6 +79,7 @@ def get_source(inpath):
                 yield frame
             vid.release()
 
+# https://github.com/ultralytics/ultralytics
 def trackingsomething():
     model = loading_model()
     yolovfive = True if chooseLoss in ["20230730", "yolofive"] else False

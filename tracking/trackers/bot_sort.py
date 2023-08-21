@@ -1,5 +1,5 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-
+# https://github.com/ultralytics/ultralytics
 from collections import deque
 
 import numpy as np
