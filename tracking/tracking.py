@@ -96,10 +96,10 @@ def trackingsomething():
     framesall = []
     for image in iterk:
         image_origin = deepcopy(image)
-        if num==703:
-            kk = 0
-        if num==300:
-            break
+        # if num==703:
+        #     kk = 0
+        # if num==300:
+        #     break
         num += 1
         try:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
