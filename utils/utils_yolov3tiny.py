@@ -359,7 +359,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, max_det = 3
         if (time.time() - t) > time_limit:
             print(f'WARNING: NMS time limit {time_limit}s exceeded')
             break  # time limit exceeded
-
+    del prediction
     return output
 
 def clip_coords(boxes, img_shape):

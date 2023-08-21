@@ -83,9 +83,80 @@ def filechange():
         os.remove(os.path.join(pth, i))
         os.system("touch %s"%os.path.join(pth, i))
 
+def torchunique():
+    # import torch
+    # tensor = [0, 6, 6, 7, 2, 2, 1, 1, 2, 3, 6, 6, 9, 9, 1]
+    # kk = torch.tensor(tensor)      # , range(len(tensor))
+    # kkk = torch.unique(kk, sorted=False)
+    # kkk = torch.unique_consecutive(kk)
+    # r = 0
+    import matplotlib.pyplot as plt
+    import math
+    x = np.arange(1, 101)
+    finalr = 0.01
+    baselr = 0.01
+    
+    y = [baselr*(1+(finalr - 1)*(i - 1)/(100 - 1)) for i in x]
+    yk = [baselr*(((1 - math.cos(i * math.pi / 100)) / 2) * (finalr - 1) + 1) for i in x]
+    lf = lambda x: (1 - x / 100) * (1.0 - 0.01) + 0.01
+    decay = lambda x: 0.999 * (1 - math.exp(-x / 2000))
+    x = np.arange(100)
+    y = [lf(i) for i in x]
+    plt.plot(x, y)
+    plt.show()
+    # (1+(0.01-1)*99/99) * 0.01
+
+def autograd():
+    import torch
+    m = torch.arange(1, 16+1, dtype=torch.float).reshape((2*2, 2*2)).requires_grad_(True)
+    y = m**2 + m * 2
+    y.retain_grad()
+    m.retain_grad()
+    dy_m = torch.autograd.grad(y, m, grad_outputs=torch.ones_like(y), retain_graph=True, create_graph=True)
+    dy_m = dy_m[0]
+    dy_m0 = dy_m[:, :2]
+    k = 0
+
+import os
+# from multiprocessing import Pool
+def removek(ik):
+    try:
+        os.remove(ik)    
+    except:
+        pass
+
+def delelte():
+    inpath = r'D:\backup\programming\dataset\train2017'
+    # p = Pool(2*2+2)
+    # for i in os.listdir(inpath):
+    #     p.apply_async(removek, args=(os.path.join(inpath, i), ))
+    # p.close()
+    # p.join()
+    import shutil
+    shutil.rmtree(inpath)
+    
+    pth = r'D:\backup\programming\dataset\val2017'
+    shutil.rmtree(pth)
+
+import scipy
+import lap
+
+def repack():
+    inputs = np.arange(9)
+    np.random.shuffle(inputs)
+    kk = np.reshape(inputs, (3, 3))
+    cost_matrix = np.array([[5, 2, 0], [3, 7, 6], [1, 6, 9]])
+    _, x, y = lap.lapjv(cost_matrix, extend_cost=True, cost_limit=100)
+    x, y = scipy.optimize.linear_sum_assignment(cost_matrix)  # row x, col y
+    return kk
+
 if __name__=='__main__':
     # k = cpu_count()
     # kk = 0
     # calsum()
     # showcv()
-    filechange()
+    # filechange()
+    # torchunique()
+    # delelte()
+    # autograd()
+    repack()

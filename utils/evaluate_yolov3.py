@@ -48,28 +48,51 @@ def loadeva():
 
     return dic, rev_cat
 
-def evaluation(dataloader = None, model=None, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
+def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
+    # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
+    # a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
+    # b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
+    # x1 = [list(a[i] == b).index(True) + 1 for i in range(80)]  # darknet to coco
+    # x2 = [list(b[i] == a).index(True) if any(b[i] == a) else None for i in range(91)]  # coco to darknet
+    return [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
+        35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+        64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
+
+def evaluation(pretrainedmodel, dataloader = None, model=None, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
             length = 0, max_det=300, cvshow = False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cpu"
+    img_evaluate = r'/root/project/val2017'
+    cocolabel = coco80_to_coco91_class()
     if not model:
+        # model = yolov3tinyNet(num_classes, anchors, device, inputwidth)
         model = Yolov3Net(num_classes, anchors, device, inputwidth)
         
         if torch.cuda.is_available():
             state_dict = torch.load(pretrainedmodel, map_location=torch.device('cuda'))
         else:
             state_dict = torch.load(pretrainedmodel, map_location=torch.device('cpu'))
-        model.load_state_dict(state_dict['state_dict'], strict=True)
+        kkk = {}
+        for key, value in state_dict['state_dict'].items():
+            kkk[key.replace("module.", "")] = value
+        state_dict['state_dict'] = kkk
+        pretrained = state_dict['state_dict']
+        model.load_state_dict(pretrained, strict=True)
+        del state_dict, pretrained, kkk
+
     model.to(device)
     model.eval()
     # score_thresh = 0.6
     # nms_thresh = 0.6 - 0.2 - 0.1
     dic, rev_cat = loadeva()
-
+    pth_evaluate = r'/root/project/yolov5-master/coco/annotations/instances_val2017.json'
+    img_evaluate = r'/root/project/yolov5-master/coco/images/val2017'
     if not dataloader:
         valdata = trainDataset(pth_evaluate, img_evaluate, stride = strides, anchors = anchors, \
-                                augment = False, inputwidth = inputwidth, transform=TFRESIZE)
-        dataloader = DataLoader(valdata, batch_size = batch_size // subsiz, shuffle=True, \
-            num_workers=cpu_count(), collate_fn=collate_fn)
+                                augment = False, inputwidth = inputwidth, transform=TFRESIZE, evaluate = True)
+        dataloader = DataLoader(valdata, batch_size = 10, shuffle=False, \
+            num_workers=11, collate_fn=collate_fn)
 
     result = []
     annFile = os.path.join(abspath, 'datas', 'instances_val2017.json')
@@ -81,12 +104,12 @@ def evaluation(dataloader = None, model=None, score_thresh_now = 0.001, nms_thre
     pthshow = os.path.join(abspath, 'datas', 'imshow')
     for i in os.listdir(pthshow):
         os.remove(os.path.join(pthshow, i))
-
-    for i, (image, labels, image_id) in enumerate(tqdm.tqdm(dataloader)):
+    if chooseLoss in ["20230730", "yolofive"]:
+        yolovfive = True
+    for i, (image, _, image_id) in enumerate(tqdm.tqdm(dataloader)):
         image = image.to(device)
-        labels = labels.to(device)
         with torch.no_grad():
-            prediction = model(image)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
+            prediction = model(image, yolovfive = yolovfive)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
         prediction = non_max_suppression(prediction, score_thresh_now, nms_thresh_now, max_det=max_det, agnostic=False)
 
         for j, det in enumerate(prediction):
@@ -102,9 +125,10 @@ def evaluation(dataloader = None, model=None, score_thresh_now = 0.001, nms_thre
                 xmin, ymin, xmax, ymax = xyxy
                 w  = xmax - xmin
                 h  = ymax - ymin
-                cla = classes[int(label)]
-                cvshow_label.append([cla, int(xmin), int(ymin), int(xmax), int(ymax)])
-                cla_id = rev_cat[cla]
+                cla_id = cocolabel[int(label)]
+                # cla = classes[int(label)]
+                # cvshow_label.append([cla, int(xmin), int(ymin), int(xmax), int(ymax)])
+                # cla_id = rev_cat[cla]
                 det_single['category_id'] = cla_id
                 det_single['bbox'] = [np.float64(round(xmin, 2)), np.float64(round(ymin, 2)), np.float64(round(w, 2)), np.float64(round(h, 2))]
                 det_single['score'] = np.float64(round(conf, 3))

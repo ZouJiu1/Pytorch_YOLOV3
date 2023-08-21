@@ -16,7 +16,7 @@ import time
 import torch
 import numpy as np
 from models.Yolov3tiny import yolov3tinyNet
-from models.layer_loss import calculate_losses_yolov3, calculate_losses_darknet, calculate_losses_Alexeydarknet
+from models.layer_loss_20230816 import calculate_losses_yolov3, calculate_losses_darknet, calculate_losses_Alexeydarknet
 import torch.optim as optim
 from utils.common import cvshow_, collate_fn, provide_determinism
 from utils.validation_yolov3tiny import validation_map

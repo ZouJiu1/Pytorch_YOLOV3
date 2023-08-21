@@ -79,6 +79,10 @@ warmepoch = 3
 Adam = False
 intialze = False
 
+# [20230730, yolofive, Alexeydarknet, darknet, darknetRevise]
+chooseLoss = "20230730"
+assert chooseLoss in ["20230730", "yolofive", "Alexeydarknet", "darknet", "darknetRevise"]
+
 batch_size = 23
 subsiz = 1
 if Adam:

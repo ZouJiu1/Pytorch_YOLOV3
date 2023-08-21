@@ -14,9 +14,11 @@ from torchvision import transforms
 # trainpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
 trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
 train_imgpath = r'/root/autodl-tmp/train2017'
+# train_imgpath = r'/root/autodl-tmp/train/images'
 pth_evaluate = r'/root/autodl-tmp/annotations/instances_val2017.json'
-# img_evaluate = r'/root/autodl-tmp/val2017'
-img_evaluate = r'/root/project/val2017'
+img_evaluate = r'/root/autodl-tmp/val2017'
+# img_evaluate = r'/root/autodl-tmp/val/images'
+# img_evaluate = r'/root/autodl-tmp/val/images'
 
 validpath = os.path.join(abspath, 'datas', 'cocoval.txt')
 validsave = os.path.join(abspath, 'datas', 'cocoval', "predict")
@@ -29,7 +31,7 @@ seed = 99999
 #  CUDA_VISIBLE_DEVICES
 #   /home/sh00259/.local/share/virtualenvs/Pytorch_YOLOV3-So1PrdKH/bin/python3.6 /home/sh00259/PycharmProjects/Pytorch_YOLOV3/Pytorch_YOLOV3_Jiu/allcodes/train_yolofastest.py
    
-pretrainedmodel = r'/root/project/yolovkkn/2023-08-14yolokkn/model_e10_map[0.267426__0.099621]_ l212.831_2023-08-14.pth'
+pretrainedmodel = r'/root/project/yolovkkn/2023-08-17yolokkn/'
 datekkk = datetime.strftime(datetime.now(),"%Y-%m-%d %H-%M-%S").replace(' ', '_')[:10]
 logfile = os.path.join(abspath, 'log', 'log_yolov3_%s.txt'%datekkk)
 darknet_weight = r"Pytorch_YOLOV3/Pytorch_YOLOV3_Jiu/pretrained"
@@ -79,7 +81,11 @@ warmepoch = 3
 Adam = False
 intialze = False
 
-batch_size = 20 + 26
+# [20230730, yolofive, Alexeydarknet, darknet, darknetRevise]
+chooseLoss = "yolofive"
+assert chooseLoss in ["20230730", "yolofive", "Alexeydarknet", "darknet", "darknetRevise"]
+
+batch_size = 20 + 10
 subsiz = 1
 if Adam:
     learning_rate = 0.001                                      #initial learning rate (SGD=1E-2 0.01, Adam=1E-3 0.001)

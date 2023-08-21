@@ -10,16 +10,19 @@ import sys
 sys.path.append(abspath)
 
 from config.config_yolovKKn import *
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2,3,4,5'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2'
 
 import time
 import torch
 import numpy as np
+from copy import deepcopy
 from models.Yolovkkn import YolovKKNet
+# from models.layer_loss_20230816 import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
 from models.layer_loss import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
-    calculate_losses_darknetRevise, calculate_losses_20230730, calculate_losses_yolofive_original
+    calculate_losses_darknetRevise, calculate_losses_20230730, calculate_losses_yolofive_revise
+#, calculate_losses_yolofive_original    layer_loss_20230816
 import torch.optim as optim
-from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer
+from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer, ModelEMA, de_parallel
 from utils.validation_yolov3tiny import validation_map
 from torch.utils.data import Dataset, DataLoader
 from loaddata.cocoread import trainDataset
@@ -55,18 +58,18 @@ def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
                 x['momentum'] = np.interp(ni, xi, [warmup_momnetum, momnetum])
         return optimizer.param_groups[0]['lr']
 
-    elif epoch < (num_epochs*(8/10)):
-        lr = baselr
-    elif epoch < (num_epochs*(9/10)):
-        lr = baselr*1e-1
-    else:
-        lr = baselr*1e-2
+    # elif epoch < (num_epochs*(8/10)):
+    #     lr = baselr
+    # elif epoch < (num_epochs*(9/10)):
+    #     lr = baselr*1e-1
     # else:
-        # lr = ((1 - math.cos(epoch * math.pi / num_epochs)) / 2) * (final_lr - 1) + 1
-        # lr = baselr * lr
+    #     lr = baselr*1e-2
     # else:
-    #     lr = 1 + ((final_lr - 1) / (num_epochs - 1)) * (epoch - 1)
+    #     lr = ((1 - np.cos(epoch * np.pi / num_epochs)) / 2) * (final_lr - 1) + 1
     #     lr = baselr * lr
+    else:
+        lr = 1 + ((final_lr - 1) / (num_epochs - 1)) * (epoch - 1)
+        lr = baselr * lr
 
     # k = []
     # for epoch in range(1, num_epochs+1):
@@ -128,10 +131,10 @@ def trainer():
 
     print(f"[init] == local rank: {local_rank}, global rank: {rank} ==")
     # exit(0)
-    if seed != -1:
-        provide_determinism(seed)
-    torch.cuda.manual_seed_all(999999999)
-    torch.manual_seed(999999999)
+    seed = 612387967
+    provide_determinism(seed)
+    torch.cuda.manual_seed_all(612387967)
+    torch.manual_seed(612387967)
     
     torch.cuda.set_device(rank % torch.cuda.device_count())
     devicenow = torch.device("cuda", local_rank)
@@ -139,8 +142,9 @@ def trainer():
 
     #pip3 install --user --upgrade opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple
     traindata = trainDataset(trainpath, train_imgpath, stride = strides, anchors = anchors, \
-                            augment = False, inputwidth = inputwidth, transform=TF)
-    num_cpu =  72 - 36  #num_cpu if num_cpu < 20 else 13
+                            augment = True, inputwidth = inputwidth, transform=TF)
+    num_cpu = (72 - 36)//2     # cpu_count()
+    # num_cpu = min([nc//max(torch.cuda.device_count(), 1), 2**3])  #num_cpu if num_cpu < 20 else 13
     count_scale = traindata.count_scale.to(devicenow)
     
     train_sampler = DistributedSampler(dataset=traindata, shuffle=True)
@@ -210,6 +214,10 @@ def trainer():
     # Convert BatchNorm to SyncBatchNorm. 
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.to(devicenow)
+    if rank == 0:
+        ema = ModelEMA(model)
+    else:
+        ema = None
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
     # params = model.parameters() # [p for p in model.parameters() if p.requires_grad]
@@ -242,7 +250,7 @@ def trainer():
     stepiters = 0
     pre_map = 0
 
-    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
+    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='none').to(devicenow)
     bce1loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
     bce2loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
     bcecls = torch.nn.BCEWithLogitsLoss(reduction='sum').to(devicenow)
@@ -255,11 +263,12 @@ def trainer():
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3)
 # '''\nepoch: {}, ratio:{:.2f}%, iteration: {}, alliters: {}, lr: {:.3f}, MSE loss: {:.3f}, Class loss: {:.3f}, \
 # # Confi loss: {:.3f}, iouloss: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}'''
-    if rank == 0:
-        print(('\n' + '%9s' * (6 + 6 + 2)) % ('Epoch', 'ratio', 'iter', 'alliter', 'lr', 'Class_L', 'Confi_L', "iouL", "Loss", "avgl", \
-            "iounow", "Confi", "NO_Confi", "Class"))
+    yolovfive = True if chooseLoss in ["20230730", "yolofive"] else False
     nb = len(dataloader)  # number of batches
     for epoch in range(1, num_epochs + 1):
+        if rank == 0:
+            print(('\n' + '%9s' * (6 + 6 + 2)) % ('Epoch', 'ratio', 'iter', 'alliter', 'lr', 'Class_L', 'Confi_L', "iouL", "Loss", "avgl", \
+                "iounow", "Confi", "NO_Confi", "Class"))
         # if rank == 0:
         #     flogs.write('Epoch {}/{}'.format(epoch, num_epochs)+'\n')
         #     print('Epoch {}/{}'.format(epoch, num_epochs))
@@ -275,8 +284,8 @@ def trainer():
 
         dataloader.sampler.set_epoch(epoch)
         lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
-        if epoch == warmepoch + 1:
-            optimizer.momentum = momnetum
+        # if epoch == warmepoch + 1:
+        #     optimizer.momentum = momnetum
         # preiou = 0
         pbar = enumerate(dataloader)
         if rank==0:
@@ -298,24 +307,31 @@ def trainer():
             
             # try:
             with torch.cuda.amp.autocast(amp):
-                prediction = model(image)
+                prediction = model(image, yolovfive = yolovfive)
 
                 # except Exception as e:
                 #     continue
                 try:
                     # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
-                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
-                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                    if chooseLoss == "darknetRevise":
+                        loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    elif chooseLoss == "darknet":
+                        loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    elif chooseLoss == "Alexeydarknet":
+                        loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    elif chooseLoss == "yolofive":
+                        loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                        # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_revise(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                        #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    elif chooseLoss == "20230730":
+                        loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
                                                                                         bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                    # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
-                    #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    else:
+                        exit(-1)
 
                     # loss, loss_components = computeloss(prediction, labels, devicenow, model)
                 except Exception as e:
@@ -326,27 +342,32 @@ def trainer():
                                         'nowepoch':epoch}
                     __savepath__ = os.path.join(savepath, datekkk) + prefix
                     os.makedirs(__savepath__, exist_ok=True)
-                    torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pth'.format(epoch, epoch_loss))
+                    torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pt'.format(epoch, epoch_loss))
                     continue
             
             # if darknetLoss and i > 30 and iouloss > 10 and iouloss / preiou > 2:
             #     loss = c_l + confi_l
-
-            scaler.scale(loss).backward()
-            # loss.backward()
+            if amp:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             if rank != -1:
                 # print(WORLD_SIZE)
                 loss *= cudanum  # 6 # gradient averaged between devices in DDP mode
 
-            # optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg
-            # optimizer.zero_grad()
-            scaler.unscale_(optimizer)  # unscale gradients
+            if amp:
+                scaler.unscale_(optimizer)  # unscale gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
-            scaler.step(optimizer)  # optimizer.step
-            scaler.update()
+            if amp:
+                scaler.step(optimizer)  # optimizer.step
+                scaler.update()
+            else:
+                optimizer.step() #C:\Users\10696\Desktop\Pytorch_YOLOV3\\datas\train\images\2010_003635.jpg                
             optimizer.zero_grad()
 
+            if ema and rank==0:
+                ema.update(model)
             # preiou = iouloss
 
             losscol.append(loss.detach().cpu().item())
@@ -370,15 +391,17 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
                                     float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
                                         epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item()))
                 flogs.write(logword+'\n')
+        # if rank==0 and ema:
+        #     ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
 
         if rank == 0 and epoch==num_epochs:
-            savestate = {'state_dict':model.state_dict(),\
-                            'iteration':i,\
+            savestate = {'state_dict':deepcopy(de_parallel(model)).half(),\
+                            'ema':deepcopy(ema.ema).half() if ema else "", \
                             'alliters':stepiters,\
                             'nowepoch':epoch}
             __savepath__ = os.path.join(savepath, datekkk) + prefix
             os.makedirs(__savepath__, exist_ok=True)
-            # torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pth'.format(epoch, epoch_loss))
+            # torch.save(savestate, __savepath__+os.sep+r'model_e{}_l{:.3f}.pt'.format(epoch, epoch_loss))
         if rank == 0:
             jkk = []
             if os.path.exists(os.path.join(abspath, 'valid.txt')):
@@ -393,23 +416,23 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
                         except:
                             pass
         if rank == 0 and (epoch in jkk or epoch==num_epochs):
-            savestate = {'state_dict':model.state_dict(),\
-                            'iteration':i,\
+            savestate = {'state_dict':deepcopy(de_parallel(model)).half(),\
+                            'ema':deepcopy(ema.ema).half() if ema else "", \
                             'alliters':stepiters,\
                             'nowepoch':epoch}
             __savepath__ = os.path.join(savepath, datekkk) + prefix
             os.makedirs(__savepath__, exist_ok=True)
             # scheduler.step(np.mean(losscol))
-            map, lengthkk = validation_map(model, valdataloader, devicenow) #, score_thresh, nms_thresh)
+            [map, mAP0], lengthkk = validation_map(model if ema==None else ema.ema, yolovfive, valdataloader, devicenow) #, score_thresh, nms_thresh)
             # map = evaluation(model, score_thresh_now = 0.01, nms_thresh_now = 0.3)
-            print("validation......num_img: {}, mAP: {}, premap:{}".format(lengthkk, map, pre_map))
+            print("validation......num_img: {}, mAP: {}, premap:{}".format(lengthkk, [map, mAP0], pre_map))
             if len(map) > 2:
                 pcmap = [round(map[0], 6), round(np.mean(map), 6)]
             strmap = str(pcmap).replace(",", "_").replace(" ", "_")
 
-            # torch.save(savestate, __savepath__+os.sep+r'model_e{}_map{}_l{:.3f}_{}.pth'.format(epoch, strmap, epoch_loss, datekkk))
+            # torch.save(savestate, __savepath__+os.sep+r'model_e{}_map{}_l{:.3f}_{}.pt'.format(epoch, strmap, epoch_loss, datekkk))
             # if(pre_map < np.mean(map)) or (epoch+1)%1==0 or epoch==num_epochs:
-            torch.save(savestate, __savepath__+os.sep+r'model_e{}_map{}_l{:.3f}_{}.pth'.format(epoch, strmap, epoch_loss, datekkk))
+            torch.save(savestate, __savepath__+os.sep+r'model_e{}_map{}_l{:.3f}_{}.pt'.format(epoch, strmap, epoch_loss, datekkk))
             print('savemodel ')
             pre_map = np.mean(map)
             del savestate
@@ -419,7 +442,6 @@ Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: 
         timeused  = time.time() - start
         print('Training complete in {:.0f}m {:.0f}s'.format(timeused//60, timeused%60))
         flogs.close()
-
 
 if __name__ == '__main__':
     # mp.spawn(demo_fn,

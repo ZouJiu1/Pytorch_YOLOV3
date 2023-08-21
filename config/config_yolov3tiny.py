@@ -30,7 +30,7 @@ seed = 99999
 #   /home/sh00259/.local/share/virtualenvs/Pytorch_YOLOV3-So1PrdKH/bin/python3.6 /home/sh00259/PycharmProjects/Pytorch_YOLOV3/Pytorch_YOLOV3_Jiu/allcodes/train_yolofastest.py
 
 # pretrainedmodel = r'/root/project/yolov3tiny/2023-08-08yolov3tiny_Alexay_mse/model_e71_map[0.30188 __0.099243]_l493.264_2023-08-08.pth'
-pretrainedmodel = r'/root/project/yolov3tiny/2023-08-12yolov3tiny_yolofive_0.01_0.937_bce_batchsize/model_e60_map[ 0.169175__0.078705]_l43.932_2023-08-12.pth'
+pretrainedmodel = r'/root/project/yolov3tiny/2023-08-12yolov3tiny_yolofive_0.01_0.937_bce_batchsize/model_e60_map[ 0 .169175__0.078705]_l43.932_2023-08-12.pth'
 datekkk = datetime.strftime(datetime.now(),"%Y-%m-%d %H-%M-%S").replace(' ', '_')[:10]
 logfile = os.path.join(abspath, 'log', 'log_yolov3tiny_%s.txt'%datekkk)
 darknet_weight = r"Pytorch_YOLOV3/Pytorch_YOLOV3_Jiu/pretrained"
@@ -79,30 +79,26 @@ TF = transforms.Compose([
 scratch = False
 freeze_backbone = False
 load_darknet_w = False
-num_epochs = 130
+num_epochs = 100
 warmepoch = 3
 Adam = False
 intialze = False
 
-multi_GPU = True
-darknetReviseLoss = False
-darknetLoss = True
-AlexeydarknetLoss = False
-yolofiveeightLoss = False
+# [20230730, yolofive, Alexeydarknet, darknet, darknetRevise]
+chooseLoss = "Alexeydarknet"
+assert chooseLoss in ["20230730", "yolofive", "Alexeydarknet", "darknet", "darknetRevise"]
 
-assert (darknetReviseLoss + darknetLoss + AlexeydarknetLoss + yolofiveeightLoss) == 1
-
-batch_size = 36
+batch_size = 60
 subsiz = 1
 num_gpu = 6
 # if Adam:
     # learning_rate = 0.001                                      #initial learning rate (SGD=1E-2 0.01, Adam=1E-3 0.001)
 # else:
 # learning_rate = (0.003 / batch_size / num_gpu)                                      #initial learning rate (SGD=1E-2 0.01, Adam=1E-3 0.001)
-learning_rate = 0.01/batch_size                                      #initial learning rate (SGD=1E-2 0.01, Adam=1E-3 0.001)
+learning_rate = 0.01                                      #initial learning rate (SGD=1E-2 0.01, Adam=1E-3 0.001)
 momnetum=0.937
 warmup_momnetum = 1.0 - 0.2
-weight_decay= 0.0005 * batch_size * num_gpu
+weight_decay= 0.0005
 # weight_decay= 0.0005
 
 device = "cuda" if torch.cuda.is_available() else "cpu"

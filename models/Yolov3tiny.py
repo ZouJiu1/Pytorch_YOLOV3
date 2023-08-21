@@ -129,9 +129,9 @@ class yolov3tinyNet(nn.Module):
         self.yolov3tinyNet_backbone = yolov3tiny_backbone(num_classes)
         # self.yolov3tinyNet_backbone = yolov3tiny_backbone_depthwise(num_classes)
 
-    def forward(self, x):
+    def forward(self, x, yolovfive = False):
         out = self.yolov3tinyNet_backbone(x)   #[small obj, big obj, ...]
-        prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize) for i in range(len(out))]
+        prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize, yolovfive = yolovfive) for i in range(len(out))]
         if self.training:
             return prediction # prediction, anchors
         else:

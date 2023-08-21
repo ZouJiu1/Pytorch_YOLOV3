@@ -12,14 +12,15 @@ import numpy as np
 import torch
 import cv2
 import torch.optim as optim
-from config.config_yolov3tiny import validsave, validpath, classes, batch_size, subsiz, validtruth, inputwidth
+# from config.config_yolov3tiny import validsave, validpath, classes, batch_size, subsiz, validtruth, inputwidth
+from config.config_yolovKKn import validsave, validpath, classes, batch_size, subsiz, validtruth, inputwidth
 from utils.utils_yolov3tiny import non_max_suppression, scale_coords
 from mAP.mAP import calculate
 from PIL import Image
 import tqdm
 from utils.evaluate_yolov3tiny import loadeva
 
-def validation_map(model, dataloader, device, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
+def validation_map(model, yolovfive, dataloader, device, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
                     max_det=300):
     model.eval()
     if not os.path.exists(validsave):
@@ -44,7 +45,7 @@ def validation_map(model, dataloader, device, score_thresh_now = 0.001, nms_thre
         image = image.to(device)
         labels = labels.to(device)
         with torch.no_grad():
-            prediction = model(image)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
+            prediction = model(image, yolovfive = yolovfive)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
         prediction = non_max_suppression(prediction, score_thresh_now, nms_thresh_now, max_det=max_det, agnostic=False)
 
         for j, det in enumerate(prediction):

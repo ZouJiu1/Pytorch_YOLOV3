@@ -15,19 +15,19 @@ from PIL import Image
 from torch.utils.data import Dataset
 import albumentations as A
 # Declare an augmentation pipeline
-P = 0.6
+P = 0.2
 AAAtransform = A.Compose([
     A.HorizontalFlip(p=P),
-    # A.RandomGamma(p=P),
+    A.RandomGamma(p=P),
     A.HueSaturationValue(p=P),
-    # A.RandomBrightnessContrast(p=P),
-    # A.MotionBlur(p=P),
-    # A.GaussianBlur(p=P),
+    A.RandomBrightnessContrast(p=P),
+    A.MotionBlur(p=P),
+    A.GaussianBlur(p=P),
     A.GaussNoise(p=P),
     # A.ToGray(p=P),
-    # A.Equalize(p=P),
+    A.Equalize(p=P),
     A.PixelDropout(p=P),
-    # A.RandomBrightness(p=P)
+    A.RandomBrightness(p=P)
 ], bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
 class trainDataset(Dataset):
@@ -141,6 +141,16 @@ class trainDataset(Dataset):
         for i in delete:
             dic.pop(i)
         self.trainpath = sorted(dic.items(), key = lambda k : k[0])
+        
+        # pth = r'/root/autodl-tmp/labels'
+        # for idx in range(len(self.trainpath)):
+        #     choose = self.trainpath[idx][1]
+        #     alllabels = choose[3:]
+        #     txtpath = os.path.join(pth, choose[0].replace(".jpg", ".txt"))
+        #     with open(txtpath, 'w') as obj:
+        #         for i in range(len(alllabels)):
+        #             label, cx, cy, w, h = alllabels[i]
+        #             obj.write(str(int(label)) + ' ' + str(cx) + ' ' + str(cy) + " " + str(w) + " " + str(h) + "\n")
         del dic, jf
 
     def __len__(self):
@@ -210,9 +220,9 @@ class trainDataset(Dataset):
         return image, torch.tensor(gt), imageid
 
 if __name__ == '__main__':
-    # trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
+    trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
     # trainpath = r'/root/autodl-tmp/annotations/instances_val2017.json'
-    # imgpth = r'/root/autodl-tmp/train2017'
+    imgpth = r'/root/autodl-tmp/train2017'
     inputwidth = 32 * 16
     anchors = [[[10,13], [16,30], [33,23]],\
         [[30,61],  [62,45],  [59,119]],  \

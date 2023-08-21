@@ -30,7 +30,7 @@ class yololayer(nn.Module):
         self.result = {}
         # self.sig = nn.Sigmoid()
 
-    def forward(self, prediction, anchors, imgsize):
+    def forward(self, prediction, anchors, imgsize, yolovfive = False):
         self.stride = imgsize//prediction.size(2)
         batch_size, _, height, width = prediction.size() #batch_size, (5+num_classes)*3, width, height
 
@@ -57,20 +57,19 @@ class yololayer(nn.Module):
         #     anchors = anchors.to(prediction.device)
 
         xy, wh, conf = prediction.split((2, 2, self.num_classes + 1), 4)
-        # yololayer_largearea   calculate_losses_darknet        
-        # xy = (xy.sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
-        # wh = torch.exp(wh) * anchors #wh #[2, 3, 13, 13, 2]
-        # if not self.training:
-        #     conf = conf.sigmoid()
-        # prediction = torch.cat((xy, wh, conf), 4)
         
-        xy = (xy.sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
-        wh = ((wh.sigmoid() * 2)**2 ) * anchors #wh #[2, 3, 13, 13, 2]
+        if yolovfive:
+            xy = (xy.sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = ((wh.sigmoid() * 2)**2 ) * anchors #wh #[2, 3, 13, 13, 2]
+        else:
+            # yololayer_largearea   calculate_losses_darknet        
+            xy = (xy.sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = torch.exp(wh) * anchors #wh #[2, 3, 13, 13, 2]
+
         if not self.training:
             conf = conf.sigmoid()
+
         prediction = torch.cat((xy, wh, conf), 4)
-        
-        
         prediction = prediction.view(batch_size, -1, self.no)
         return prediction, self.result[height]
 

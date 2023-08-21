@@ -108,11 +108,12 @@ def evaluation(pretrainedmodel, dataloader = None, model=None, score_thresh_now 
     pthshow = os.path.join(abspath, 'datas', 'imshow')
     for i in os.listdir(pthshow):
         os.remove(os.path.join(pthshow, i))
-
+    if chooseLoss in ["20230730", "yolofive"]:
+        yolovfive = True
     for i, (image, _, image_id) in enumerate(tqdm.tqdm(dataloader)):
         image = image.to(device)
         with torch.no_grad():
-            prediction = model(image)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
+            prediction = model(image, yolovfive = yolovfive)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
         prediction = non_max_suppression(prediction, score_thresh_now, nms_thresh_now, max_det=max_det, agnostic=False)
 
         for j, det in enumerate(prediction):

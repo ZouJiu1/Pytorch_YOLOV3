@@ -261,9 +261,9 @@ class YolovKKNet(nn.Module):
         self.anchors_sparse = [torch.tensor(anchors[i]).float().view(-1, 2).view(1, -1, 1, 1, 2).to(device) for i in range(len(anchors))]
         self.yolovKKNet_backbone = yolovkkn_backbone(num_classes)
 
-    def forward(self, x):
+    def forward(self, x, yolovfive = False):
         out = self.yolovKKNet_backbone(x)                   #            [small obj   middle obj   big obj]
-        prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize) for i in range(len(out))]
+        prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize, yolovfive = yolovfive) for i in range(len(out))]
         if self.training:
             return prediction # prediction, anchors
         else:

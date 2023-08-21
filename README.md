@@ -7,6 +7,20 @@ I used the **torch.mean** to calculate the loss of non_confidence before, so it 
 
 but the training codes and model is correct.
 
+##### pretrained model
+
+[model_e30_map https://www.aliyundrive.com/s/xVYNAiaa19c 提取码: 16bn](https://www.aliyundrive.com/s/xVYNAiaa19c)
+[model_e51_map https://www.aliyundrive.com/s/F7wRTcitbkB 提取码: gn85](https://www.aliyundrive.com/s/F7wRTcitbkB)
+
+```
+python allcodes/train_yolovkkn.py
+python allcodes/train_yolovkkn_distribute.py
+```
+
+```
+python predict_yolovkkn.py
+```
+
 ##### Things different
 
 I write several different loss calculation function with torch.sum instead of mean and use yolov3-tiny network to training, it is training in gpu server with multi gpu cards, it needs much money for renting it, so I train very little epoch and use small batchsize to saving money without adjust hyper_params. The training result is very good compared with before.
@@ -55,6 +69,20 @@ the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch
 ### dataset
 
 the training datast is coco, which website is [https://cocodataset.org/#download](https://cocodataset.org/#download)
+
+## Tracking
+the tracking result is here: 
+<img src="./gif.gif" width = "100%" />
+<img src="./gifman.gif" width = "100%" />
+
+###### run command
+```
+python tracking/tracking.py
+```
+
+### tracking dataset download
+[MVI_39031.zip     https://www.aliyundrive.com/s/PtnZBBf2E2V       提取码: e3q7](https://www.aliyundrive.com/s/PtnZBBf2E2V)
+[MOT16-06-raw.webm https://www.aliyundrive.com/s/tUwZH1H5gET       提取码: p50u](https://www.aliyundrive.com/s/tUwZH1H5gET)
 
 -------------------------------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------------
