@@ -358,6 +358,7 @@ def trainer():
 
             if amp:
                 scaler.unscale_(optimizer)  # unscale gradients
+            # https://jamesmccaffrey.wordpress.com/2022/10/17/the-difference-between-pytorch-clip_grad_value_-and-clip_grad_norm_-functions/
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
             if amp:
                 scaler.step(optimizer)  # optimizer.step
