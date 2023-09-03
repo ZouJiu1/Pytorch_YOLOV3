@@ -14,11 +14,101 @@ import cv2
 import torch.optim as optim
 # from config.config_yolov3tiny import validsave, validpath, classes, batch_size, subsiz, validtruth, inputwidth
 from config.config_yolovKKn import validsave, validpath, classes, batch_size, subsiz, validtruth, inputwidth
-from utils.utils_yolov3tiny import non_max_suppression, scale_coords
+from utils.utils_yolov3tiny import non_max_suppression, scale_coords, segnon_max_suppression, segnon_keypoint_max_suppression
 from mAP.mAP import calculate
 from PIL import Image
 import tqdm
 from utils.evaluate_yolov3tiny import loadeva
+
+
+
+def validation_map_segkeypoint(model, yolovfive, dataloader, device, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
+                    max_det=300):
+    model.eval()
+    if not os.path.exists(validsave):
+        os.mkdir(validsave)
+    for i in os.listdir(validsave):
+        os.remove(os.path.join(validsave, i))
+    kl = []
+    with open(validpath, 'r') as obj:
+        for i in obj.readlines():
+            i = i.strip()
+            if os.path.exists(i):
+                kl.append(i)
+    # if len(kl)>100:
+    #     np.random.shuffle(kl)
+    #     kl = kl[:100]
+    #     # kl = np.random.choice(kl, 600, replace=False)
+    # length = len(kl)
+    
+    dic, rev_cat = loadeva()
+    
+    for i, (image, labels, gtmask, keypoint, image_id) in enumerate(tqdm.tqdm(dataloader, mininterval=6)):
+        image = image.to(device)
+        labels = labels.to(device)
+        with torch.no_grad():
+            prediction, keypoint, Proto = model(image, yolovfive = yolovfive)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
+        prediction, outkpt = segnon_keypoint_max_suppression(prediction, keypoint, score_thresh_now, nms_thresh_now, max_det=max_det, agnostic=False)
+
+        for j, det in enumerate(prediction):
+            id = image_id[j][0]
+            name = dic[id]
+            ff = open(os.path.join(validsave, name.replace('.jpg', '.txt')), 'w')
+            if len(det)==0:
+                continue
+            det[:, :2*2] = scale_coords(image.shape[2:], det[:, :2*2], image_id[j][1]).round()
+            det = det.cpu().numpy()
+            for *xyxy, conf in reversed(det[:, :6-1]):
+                xmin, ymin, xmax, ymax = xyxy
+                ff.write(classes[int(0)]+','+str(xmin)+','+str(ymin)+\
+                        ","+str(xmax)+','+str(ymax)+','+str(conf)+'\n')
+            ff.close()
+
+    return calculate(validtruth, validsave, classes), len(dataloader) * (batch_size//subsiz)
+
+def validation_map_seg(model, yolovfive, dataloader, device, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
+                    max_det=300):
+    model.eval()
+    if not os.path.exists(validsave):
+        os.mkdir(validsave)
+    for i in os.listdir(validsave):
+        os.remove(os.path.join(validsave, i))
+    kl = []
+    with open(validpath, 'r') as obj:
+        for i in obj.readlines():
+            i = i.strip()
+            if os.path.exists(i):
+                kl.append(i)
+    # if len(kl)>100:
+    #     np.random.shuffle(kl)
+    #     kl = kl[:100]
+    #     # kl = np.random.choice(kl, 600, replace=False)
+    # length = len(kl)
+    
+    dic, rev_cat = loadeva()
+    
+    for i, (image, labels, gtmask, image_id) in enumerate(tqdm.tqdm(dataloader, mininterval=6)):
+        image = image.to(device)
+        labels = labels.to(device)
+        with torch.no_grad():
+            prediction, prototype = model(image, yolovfive = yolovfive)   # zip -r -q /home/featurize/work/COCO2017.zip ./COCO2017
+        prediction = segnon_max_suppression(prediction, score_thresh_now, nms_thresh_now, max_det=max_det, agnostic=False)
+
+        for j, det in enumerate(prediction):
+            id = image_id[j][0]
+            name = dic[id]
+            ff = open(os.path.join(validsave, name.replace('.jpg', '.txt')), 'w')
+            if len(det)==0:
+                continue
+            det[:, :2*2] = scale_coords(image.shape[2:], det[:, :2*2], image_id[j][1]).round()
+            det = det.cpu().numpy()
+            for *xyxy, conf, label in reversed(det[:, :6]):
+                xmin, ymin, xmax, ymax = xyxy
+                ff.write(classes[int(label)]+','+str(xmin)+','+str(ymin)+\
+                        ","+str(xmax)+','+str(ymax)+','+str(conf)+'\n')
+            ff.close()
+
+    return calculate(validtruth, validsave, classes), len(dataloader) * (batch_size//subsiz)
 
 def validation_map(model, yolovfive, dataloader, device, score_thresh_now = 0.001, nms_thresh_now = 0.6, \
                     max_det=300):

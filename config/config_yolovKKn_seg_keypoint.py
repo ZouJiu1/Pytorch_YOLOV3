@@ -12,10 +12,10 @@ from datetime import datetime
 from torchvision import transforms
 
 # trainpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
-trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
+trainpath = r'/root/autodl-tmp/annotations/person_keypoints_train2017.json'
 train_imgpath = r'/root/autodl-tmp/train2017'
 # train_imgpath = r'/root/autodl-tmp/train/images'
-pth_evaluate = r'/root/autodl-tmp/annotations/instances_val2017.json'
+pth_evaluate = r'/root/autodl-tmp/annotations/person_keypoints_val2017.json'
 img_evaluate = r'/root/autodl-tmp/val2017'
 # img_evaluate = r'/root/autodl-tmp/val/images'
 # img_evaluate = r'/root/autodl-tmp/val/images'
@@ -41,14 +41,14 @@ savepath = r'/root/project/yolovkkn'
 # classes = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
 # classes = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
 
-classes = []
-with open(os.path.join(abspath, 'datas', 'coconame2017.txt'), 'r', encoding='utf-8') as obj:
-    for i in obj.readlines():
-        i = i.strip()
-        classes.append(i)
-num_classes = 80
+# classes = []
+# with open(os.path.join(abspath, 'datas', 'coconame2017.txt'), 'r', encoding='utf-8') as obj:
+#     for i in obj.readlines():
+#         i = i.strip()
+#         classes.append(i)
+# num_classes = 80
 
-assert num_classes==len(classes)
+# assert num_classes==len(classes)
 
 inputwidth = 32 * 16     # 32 * 16   32 * 19 
 anchor_per_layer = 3
@@ -94,5 +94,4 @@ else:
 momnetum=0.937
 warmup_momnetum = 1.0 - 0.2
 weight_decay= 0.0005
-
 device = "cuda" if torch.cuda.is_available() else "cpu"

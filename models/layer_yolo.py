@@ -80,6 +80,143 @@ class yololayer(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
+class yololayer_seg(nn.Module):
+    def __init__(self, device, num_anchors, num_classes):
+        super(yololayer_seg, self).__init__()
+        self.device = device
+        self.grid = torch.tensor([[],[]])
+        self.no = num_classes + 5 + 32
+        self.num_classes = num_classes
+        self.num_anchors = num_anchors
+        self.result = {}
+        # self.sig = nn.Sigmoid()
+
+    def forward(self, prediction, anchors, imgsize, yolovfive = False):
+        self.stride = imgsize//prediction.size(2)
+        batch_size, _, height, width = prediction.size() #batch_size, (5+num_classes)*3, width, height
+
+        #prediction [2, 75, 13, 13]
+        # prediction = prediction.view((batch_size, self.num_anchors, height, width, self.no)) #[2, 3, 13, 13, 25]
+        prediction = prediction.view(batch_size, self.num_anchors, self.no, height, width).permute(0, 1, 3, 4, 2).contiguous()
+
+        if height not in self.result.keys():
+            self.grid__ = self._make_grid(height, width).to(self.device)
+            self.grid__ = torch.repeat_interleave(self.grid__, self.num_anchors, dim=1) * self.stride
+            self.wh = torch.ones_like(self.grid__) * anchors
+            result = torch.concat([self.grid__, self.wh], axis = -1)
+            result = result.view(-1, 2*2)
+            result = xywh2xyxy(result, imgsize, clamp=False)
+            self.result[height] = result
+        # # assert 1==0, self._make_grid(prediction.size()[2], prediction.size()[2]).size()
+        # if not self.training:
+            # print(prediction.size(), self.grid[0].size())
+        if self.grid[0].size()[0] != prediction.size()[2]:
+            self.grid = self._make_grid(prediction.size()[2], prediction.size()[2]).to(self.device)
+        # calculate_losses_yolofive
+        # if self.grid.device!=prediction.device:
+        #     self.grid = self.grid.to(prediction.device)
+        #     anchors = anchors.to(prediction.device)
+
+        xy, wh, conf, mask = prediction.split((2, 2, self.num_classes + 1, prediction.size()[-1] - self.num_classes - 1 - 2 - 2), 4)
+        
+        if yolovfive:
+            xy = (xy.sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = ((wh.sigmoid() * 2)**2 ) * anchors #wh #[2, 3, 13, 13, 2]
+        else:
+            # yololayer_largearea   calculate_losses_darknet        
+            xy = (xy.sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = torch.exp(wh) * anchors #wh #[2, 3, 13, 13, 2]
+
+        if not self.training:
+            conf = conf.sigmoid()
+
+        prediction = torch.cat((xy, wh, conf, mask), 4)
+        prediction = prediction.view(batch_size, -1, self.no)
+        return prediction, self.result[height]
+
+    def _make_grid(self, nx, ny):
+        # x_coord = torch.arange(width).repeat(height, 1).to(self.device)    #[13, 13]
+        # y_coord = torch.transpose((torch.arange(height).repeat(width, 1)), 0, 1).to(self.device)     #[13, 13]
+        # return [x_coord, y_coord]
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
+        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+
+
+
+class yololayer_segKeyPoint(nn.Module):
+    def __init__(self, device, num_anchors, num_classes):
+        super(yololayer_segKeyPoint, self).__init__()
+        self.device = device
+        self.grid = torch.tensor([[],[]])
+        self.keynum = (16+1)*3
+        self.no = 5 + 32
+        self.num_classes = 0
+        self.num_anchors = num_anchors
+        self.result = {}
+        # self.sig = nn.Sigmoid()
+
+    def forward(self, prediction, anchors, imgsize, yolovfive = False):
+        self.stride = imgsize//prediction[0].size(2)
+        batch_size, _, height, width = prediction[0].size() #batch_size, (5+num_classes)*3, width, height
+
+        #prediction [2, 75, 13, 13]
+        # prediction = prediction.view((batch_size, self.num_anchors, height, width, self.no)) #[2, 3, 13, 13, 25]
+        prediction, keypoint = prediction
+        prediction = prediction.view(batch_size, self.num_anchors, self.no, height, width).permute(0, 1, 3, 4, 2).contiguous()
+        keypoint = keypoint.view(batch_size, self.num_anchors, self.keynum, height, width).permute(0, 1, 3, 4, 2).contiguous()
+
+        if height not in self.result.keys():
+            self.grid__ = self._make_grid(height, width).to(self.device)
+            self.grid__ = torch.repeat_interleave(self.grid__, self.num_anchors, dim=1) * self.stride
+            self.wh = torch.ones_like(self.grid__) * anchors
+            result = torch.concat([self.grid__, self.wh], axis = -1)
+            result = result.view(-1, 2*2)
+            result = xywh2xyxy(result, imgsize, clamp=False)
+            self.result[height] = result
+        # # assert 1==0, self._make_grid(prediction.size()[2], prediction.size()[2]).size()
+        # if not self.training:
+            # print(prediction.size(), self.grid[0].size())
+        if self.grid[0].size()[0] != prediction.size()[2]:
+            self.grid = self._make_grid(prediction.size()[2], prediction.size()[2]).to(self.device)
+            self.kptgrid = self.grid.unsqueeze(-2)
+        # calculate_losses_yolofive
+        # if self.grid.device!=prediction.device:
+        #     self.grid = self.grid.to(prediction.device)
+        #     anchors = anchors.to(prediction.device)
+
+        xy, wh, conf, mask = prediction.split((2, 2, 1, 32), 4)
+        # xy, wh, conf = prediction.split((2, 2, 1), 4)
+
+        n, c, h, w, kk = keypoint.size()
+        keypoint = keypoint.view(n, c, h, w, kk//3, 3)
+        keypoint, keyconf = keypoint.split((2, 1), -1)
+        keypoint = (keypoint * 2 - 0.6 + 0.1 + self.kptgrid) * self.stride
+        if yolovfive:
+            xy = (xy.sigmoid() * 2 - 0.6 + 0.1 + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = ((wh.sigmoid() * 2)**2 ) * anchors #wh #[2, 3, 13, 13, 2]
+        else:
+            # yololayer_largearea   calculate_losses_darknet
+            xy = (xy.sigmoid() + self.grid) * self.stride #x #[2, 3, 13, 13]
+            wh = torch.exp(wh) * anchors #wh #[2, 3, 13, 13, 2]
+
+        if not self.training:
+            conf = conf.sigmoid()
+            keyconf = keyconf.sigmoid()
+
+        prediction = torch.cat((xy, wh, conf, mask), 4)
+        # prediction = torch.cat((xy, wh, conf), 4)
+        keypoint = torch.cat((keypoint, keyconf), 5)
+        prediction = prediction.view(batch_size, -1, self.no)
+        keypoint = keypoint.view(batch_size, -1, kk//3, 3)
+        return prediction, self.result[height], keypoint
+
+    def _make_grid(self, nx, ny):
+        # x_coord = torch.arange(width).repeat(height, 1).to(self.device)    #[13, 13]
+        # y_coord = torch.transpose((torch.arange(height).repeat(width, 1)), 0, 1).to(self.device)     #[13, 13]
+        # return [x_coord, y_coord]
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing='ij')
+        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+
 
 def _upcast(t: Tensor) -> Tensor:
     # Protects from numerical overflows in multiplications by upcasting to the equivalent higher type

@@ -14,8 +14,8 @@ import numpy as np
 
 from loaddata.cocoread import trainDataset
 import matplotlib.pyplot as plt
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+# from pycocotools.coco import COCO
+# from pycocotools.cocoeval import COCOeval
 import numpy as np
 import skimage.io as io
 import pylab

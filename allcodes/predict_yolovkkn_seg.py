@@ -1,7 +1,7 @@
 #Author：ZouJiu
 #Time: 2023-7-28
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '-1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 abspath = os.path.abspath(__file__)
 filename = os.sep.join(abspath.split(os.sep)[-2:])
@@ -13,10 +13,11 @@ import numpy as np
 import torch
 import time
 import cv2
-from models.Yolovkkn import YolovKKNet
+from models.Yolovkkn_seg import YolovKKNet
+from models.layer_loss_segment import process_mask, masks2segments
 from PIL import Image
 from config.config_yolovKKn import *
-from utils.utils_yolov3tiny import non_max_suppression, loadtorchmodel, scale_coords
+from utils.utils_yolov3tiny import segnon_max_suppression, loadtorchmodel, scale_coords
 # from tensorboardX import SummaryWriter
 # from torchviz import make_dot
 
@@ -30,10 +31,10 @@ def predict_batch():
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/datas/val.txt'
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
     imgpath = r"C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\train.txt"
-    savepath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\images\yolokkn201#'
+    savepath = r'/root/project/Pytorch_YOLOV3/datas/imshowseg'
     os.makedirs(savepath, exist_ok = True)
     # pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\yolovkkn\2023-08-16yolokkn\model_e51_map[0.48195__0.256185]_l64988.657_2023-08-16.pth'
-    pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\yolovkkn\2023-08-18yolokkn\model_e30_map[0.396382__0.245314]_l8.850_2023-08-18.pt'
+    pretrainedmodel = r'/root/project/yolovkkn/2023-09-01yolokkn/model_e46_map[0.50716__0.334552]_lnan_2023-09-01.pt'
     # imgpath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\datas\valid\valid.txt'
     # savepath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\images\730\valid'
     for i in os.listdir(savepath):
@@ -57,10 +58,6 @@ def predict_batch():
         model.load_state_dict(kkk, strict = True)
         del kkk
     del state_dict
-    for i in model.parameters():
-        kk = i.device
-        w = kk==torch.device('cpu')
-        k = 0
     yolovfive = True if chooseLoss in ["20230730", "yolofive"] else False
     # pretrained = loadtorchmodel(pretrainedmodel)
     # model.load_state_dict(pretrained, strict=True)
@@ -68,15 +65,15 @@ def predict_batch():
         model.yolo[i].eval()
         model.yolo[i].device = device
     print('loaded', pretrainedmodel)
-    lis = []
-    with open(imgpath, 'r') as f:
-        for i in f.readlines():
-            i = i.strip()
-            lis.append(i)
+    # lis = []
+    # with open(imgpath, 'r') as f:
+    #     for i in f.readlines():
+    #         i = i.strip()
+    #         lis.append(i)
 
     # inpth = r'F:\val201seven'
     # inpth = r'C:\Users\10696\Desktop\kkk'
-    inpth = r'F:\COCOIMAGE\coco\images\val201#'
+    inpth = r'/root/autodl-tmp/tmp/val2017'
     lis = [os.path.join(inpth, i) for i in os.listdir(inpth)]
 
     np.random.seed(999)
@@ -86,6 +83,8 @@ def predict_batch():
     score_thresh = 0.38
     nms_thresh = 0.6 - 0.2 - 0.1
     # np.random.shuffle(lis)
+    colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [30, 128, 255], [255, 128, 30], [102, 178, 255], [51, 153, 255],[255, 153, 153], [255, 102, 102], \
+        [255, 51, 51], [153, 255, 153], [102, 255, 102],[255, 128, 0], [255, 153, 51], [255, 178, 102], [230, 230, 0], [255, 153, 255]]
     for ind, i in enumerate(lis):
         # img = cv2.imread(i)
         # image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -102,9 +101,9 @@ def predict_batch():
         img = TFRESIZE(image)
         img = torch.unsqueeze(img, 0).to(device)
         with torch.no_grad():
-            pred  = model(img, yolovfive=yolovfive)
+            pred, Proto = model(img, yolovfive=yolovfive)
             # print(pred[...])
-            pred = non_max_suppression(pred, score_thresh, nms_thresh, agnostic=False)
+            pred = segnon_max_suppression(pred, score_thresh, nms_thresh, agnostic=False)
             #可视化  tensorboard --logdir=./
             '''
                 with SummaryWriter("./log", comment="sample_model_visualization") as sw:
@@ -123,7 +122,10 @@ def predict_batch():
                 if len(det)==0:
                     continue
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], image.shape).round()
-                for *xyxy, conf, label in reversed(det):
+                masks = process_mask(Proto[j], det[:, 6:], det[:, :4], image.shape[:2], upsample=True)  # HWC
+                masks = masks.cpu().numpy()
+                number = 0
+                for *xyxy, conf, label in reversed(det[:, :6]):
                     xmin, ymin, xmax, ymax = xyxy
                     xmin, ymin, xmax, ymax = xmin.cpu().item(), ymin.cpu().item(), xmax.cpu().item(), ymax.cpu().item()
                     conf = conf.cpu().item()
@@ -135,8 +137,27 @@ def predict_batch():
                     k = areak / kk
                     if k > (1-0.1) and len(det) >= 2:
                         continue
+                    
+                    cl = np.random.randint(len(colors))
+                    clr = colors[cl]
+                    ma = masks[number]
+                    mak = ma.copy()
+                    mak[mak > 0] = clr[0]
+                    maw = ma.copy()
+                    maw[maw > 0] = clr[1]
+                    mal = ma.copy()
+                    mal[mal > 0] = clr[2]
+                    ma = np.stack([mak, maw, mal])
+                    ma = np.transpose(ma, (1, 2, 0))
+                    ratio = 0.3+0.2
+                    image[ma > 0] = image[ma > 0] * ratio
+                    image = image + ma * (1 - ratio)
+                    image = np.asarray(image, dtype = np.uint8)
+                    img = Image.fromarray(image)
+                    image = np.array(img)
+
                     try:
-                        cv2.rectangle(image, (minx, miny), (maxx, maxy), [255, 0, 0], 2)
+                        cv2.rectangle(image, (minx, miny), (maxx, maxy), [200, 0, 0], 2)
                         cnt += 1
                     except Exception as e:
                         print(e)
@@ -145,6 +166,7 @@ def predict_batch():
                     # text = text.replace('4','9')
                     cv2.putText(image, text, (minx, miny+13), cvfont, 0.5, [255, 0, 0], 1)
                     # print(classes[int(label[j])], end=' ')
+                    number += 1
                 # print() 
             na = i.split(os.sep)[-1]
             if cnt > 0:

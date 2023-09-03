@@ -4,9 +4,9 @@ import numpy as np
 from multiprocessing import Pool, cpu_count
 from multiprocessing import Array
 
-ik = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\1000000000000.jpg'
-pth = r'F:\20230416\coco\images\train2014'
-trainpath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\2023\PyTorch-YOLOv3-master\data\person\personcartrain.txt'
+ik = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\images\0.jpg'
+pth = r'F:\COCOIMAGE\coco\images\val201#'
+# trainpath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\2023\PyTorch-YOLOv3-master\data\person\personcartrain.txt'
 
 def get(img):
     img = img.flatten()
@@ -32,12 +32,13 @@ def getfil(imgpth, arr, num):
 #     dic[i] = cok
 if __name__=='__main__':
     p = Pool(cpu_count()//2)
-    kee = []
-    with open(trainpath, 'r') as obj:
-        for i in obj.readlines():
-            i = i.strip()
-            kee.append(i)
+    # kee = []
+    # with open(trainpath, 'r') as obj:
+    #     for i in obj.readlines():
+    #         i = i.strip()
+    #         kee.append(i)
     num = 0
+    kee = [os.path.join(pth, i) for i in os.listdir(pth)]
     arr = Array('f', len(kee))
     for i in kee:
         getfil(i, arr, num,)

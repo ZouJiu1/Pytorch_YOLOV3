@@ -17,7 +17,6 @@ import albumentations as A
 # Declare an augmentation pipeline
 P = 0.2
 AAAtransform = A.Compose([
-    A.HorizontalFlip(p=P),
     A.RandomGamma(p=P),
     A.HueSaturationValue(p=P),
     A.RandomBrightnessContrast(p=P),
@@ -26,8 +25,34 @@ AAAtransform = A.Compose([
     A.GaussNoise(p=P),
     # A.ToGray(p=P),
     A.Equalize(p=P),
-    A.PixelDropout(p=P)
+    A.PixelDropout(p=P),
 ], bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
+
+def polygon2mask(img_size, inputwidth, polygons, cx, cy, id, xmin, ymin, xmax, ymax, color=1, downsample_ratio=1):
+    #  https://github.com/ultralytics/yolov5/tree/master/utils
+    """
+    Args:
+        img_size (tuple): The image size.
+        polygons (np.ndarray): [N, M], N is the number of polygons,
+            M is the number of points(Be divided by 2).
+    """
+    # downsample_ratio = 2*2
+    mask = np.zeros(img_size, dtype=np.uint8)
+    for i in range(len(polygons)):
+        polyg = np.asarray(polygons[i])
+        polyg = polyg.astype(np.int32)
+        shape = polyg.shape
+        # polyg = polyg.reshape(-1, 2)
+        # cv2.fillConvexPoly(mask, polyg, color=color)
+
+        polyg = polyg.reshape(1, -1, 2)
+        cv2.fillPoly(mask, polyg, color=color)
+    nh, nw = (inputwidth // downsample_ratio, inputwidth // downsample_ratio)
+    # NOTE: fillPoly firstly then resize is trying the keep the same way
+    # of loss calculation when mask-ratio=1.
+    mask = cv2.resize(mask, (nw, nh))
+    mask = np.array(mask, dtype=np.bool_)
+    return mask
 
 class trainDataset(Dataset):
     def __init__(self, traintxt, all_imgpath, stride, anchors, inputwidth, augment=True, transform=None, target_transform=None, evaluate = False):
@@ -91,8 +116,15 @@ class trainDataset(Dataset):
         allnum = 0
         for i in range(len(jf['annotations'])):
             id = jf['annotations'][i]['image_id']
+            if jf['annotations'][i]['num_keypoints']==0:
+                continue
+            keypoints = np.array(jf['annotations'][i]['keypoints'], dtype=np.float32)
+            keypoints = keypoints.reshape((16+1, 3))
+            
             label_id = jf['annotations'][i]['category_id']
             label = classes.index(cat[label_id])
+            if label!=0:
+                continue
 
             if label not in self.count.keys():
                 self.count[label] = [1]
@@ -100,16 +132,31 @@ class trainDataset(Dataset):
                 self.count[label][0] += 1
             allnum += 1
 
-            x, y, w, h = jf['annotations'][i]['bbox']
-            cx = (x + w / 2) / dic[id][2]
-            cy = (y + h / 2) / dic[id][1]
-            w = w / dic[id][2]
-            h = h / dic[id][1]
+            polygon = jf['annotations'][i]['segmentation']
+            if not isinstance(polygon, list):
+                continue
+            imgsize = [dic[id][1], dic[id][2]]
+            # imgsize = [dic[id][2], dic[id][1]]
+            # box = jf['annotations'][i]['bbox']
+            segment = []
+            for ip in range(len(polygon)):
+                segment += polygon[ip]
+            segment = np.array(segment, dtype=np.float32).reshape((-1, 2))
+            x, y = segment.T
+            xmin, ymin, xmax, ymax = x.min(), y.min(), x.max(), y.max()
             
+            cx = (xmin + xmax) / 2 / dic[id][2]
+            cy = (ymin + ymax) / 2 / dic[id][1]
+            w = (xmax - xmin) / dic[id][2]
+            h = (ymax - ymin) / dic[id][1]
+            
+            masks = polygon2mask(imgsize, self.inputwidth, polygon, (xmin + xmax) / 2, (ymin + ymax) / 2, id, xmin, ymin, xmax, ymax, color=1, downsample_ratio=2*2)
+            keypoints[:, 0] = keypoints[:, 0] / dic[id][2]
+            keypoints[:, 1] = keypoints[:, 1] / dic[id][1]
             if cx > 1.0 or cx < 0.0 or cy > 1.0 or cy < 0.0 or w > 1.0 or w <= 0.0 or h > 1.0 or h <= 0.0:
                 continue
 
-            dic[id].append([label, cx, cy, w, h])
+            dic[id].append([label, cx, cy, w, h, masks, keypoints])
         
         for key, value in self.count.items():
             self.count[key].extend([self.count[0][0] / value[0], allnum])
@@ -171,6 +218,8 @@ class trainDataset(Dataset):
         bboxes = []
         labels = []
         gt = []
+        masks = []
+        kpt = []
         # print(labelpath, imgpath)
         
         # outpath = r'/root/project/Pytorch_YOLOV3/loaddata/saveimg'
@@ -178,7 +227,7 @@ class trainDataset(Dataset):
         
         alllabels = choose[3:]
         for i in range(len(alllabels)):
-            label, cx, cy, w, h = alllabels[i]
+            label, cx, cy, w, h, mask, keypoints = alllabels[i]
             if len(alllabels) > 10 and w > 0.7 and h < 0.7 and label==0:
                 # xmin = int((cx - w/2) * 32*16)
                 # ymin = int((cy - h/2) * 32*16)
@@ -190,6 +239,11 @@ class trainDataset(Dataset):
                 # cv2.imwrite(os.path.join(outpath, str(imageid[0])+".jpg"), img)
                 continue
             # label, cx, cy, w, h = int(label), float(cx), float(cy), float(w), float(h)
+            # mask[mask > 0] = 200
+            # cv2.imshow('name', mask)
+            # cv2.waitKey(0)
+            masks.append(mask)
+            kpt.append(keypoints)
             gt.append([0, int(label), cx, cy, w, h])
             bboxes.append([cx, cy, w, h])
             labels.append(int(label))
@@ -216,12 +270,14 @@ class trainDataset(Dataset):
         image = Image.fromarray(image)
         if self.transform:
             image = self.transform(image)
-        return image, torch.tensor(gt), imageid
+        masks = np.array(masks)
+        kpt = np.array(kpt)
+        return image, torch.tensor(gt), torch.tensor(masks, dtype=torch.bool), torch.tensor(kpt, dtype=torch.float32), imageid
 
 if __name__ == '__main__':
-    trainpath = r'/root/autodl-tmp/annotations/instances_train2017.json'
-    # trainpath = r'/root/autodl-tmp/annotations/instances_val2017.json'
-    imgpth = r'/root/autodl-tmp/train2017'
+    # trainpath = r'F:\annotations_trainval2017\annotations\instances_train2017.json'
+    trainpath = r'F:\annotations_trainval2017\annotations\person_keypoints_val2017.json'
+    imgpth = r'F:\val201seven'
     inputwidth = 32 * 16
     anchors = [[[10,13], [16,30], [33,23]],\
         [[30,61],  [62,45],  [59,119]],  \

@@ -1,0 +1,725 @@
+#Author：ZouJiu
+#Time: 20230727
+
+import os
+abspath = os.path.abspath(__file__)
+filename = os.sep.join(abspath.split(os.sep)[-2:])
+abspath = abspath.replace(filename, "")
+import sys
+sys.path.append(abspath)
+
+import cv2
+import time
+import torch
+from copy import deepcopy
+import torch.nn as nn
+import numpy as np
+from torch.autograd import Variable
+import torch.nn.functional as F
+
+from models.layer_yolo import yololayer_segKeyPoint
+
+class ConvBlock_LN(nn.Module):
+    def __init__(self, inc, ouc, kernel_size, stride, padding=0, groups = 1, bias = True, act = True):
+        super(ConvBlock_LN, self).__init__()
+        self.silu = nn.SiLU()
+        self.conv = nn.Conv2d(inc, ouc, kernel_size, stride, padding, groups=groups, bias=bias)
+        self.bn = nn.BatchNorm2d(ouc)
+        self.act = act
+        
+    def forward(self, x):
+        if self.act:
+            x = self.silu(self.bn(self.conv(x)))
+        else:
+            x = self.bn(self.conv(x))
+        return x
+
+def autopad(k, p=None, d=1):  # kernel, padding, dilation
+    """Pad to 'same' shape outputs."""
+    if d > 1:
+        k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+    if p is None:
+        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
+    return p
+
+class Conv(nn.Module):
+    """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)."""
+    default_act = nn.SiLU()  # default activation
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+        """Initialize Conv layer with given arguments including activation."""
+        super().__init__()
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+
+    def forward(self, x):
+        """Apply convolution, batch normalization and activation to input tensor."""
+        return self.act(self.bn(self.conv(x)))
+
+    def forward_fuse(self, x):
+        """Perform transposed convolution of 2D data."""
+        return self.act(self.conv(x))
+
+class Bottleneck(nn.Module):
+    """Standard bottleneck."""
+
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):  # ch_in, ch_out, shortcut, groups, kernels, expand
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x):
+        """'forward()' applies the YOLOv5 FPN to input data."""
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+class C2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+
+    def forward(self, x):
+        """Forward pass through C2f layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+    def forward_split(self, x):
+        """Forward pass using split() instead of chunk()."""
+        y = list(self.cv1(x).split((self.c, self.c), 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+class C3(nn.Module):
+    # CSP Bottleneck with 3 convolutions
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
+
+    def forward(self, x):
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+
+class SPPF(nn.Module):
+    """Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher."""
+
+    def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
+        super().__init__()
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+
+    def forward(self, x):
+        """Forward pass through Ghost Convolution block."""
+        x = self.cv1(x)
+        y1 = self.m(x)
+        y2 = self.m(y1)
+        return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
+
+class Proto(nn.Module):
+    # YOLOv5 mask Proto module for segmentation models
+    def __init__(self, c1, c_=256, c2=32):  # ch_in, number of protos, number of masks
+        super().__init__()
+        self.cv1 = Conv(c1, c_, k=3)
+        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.cv2 = Conv(c_, c_, k=3)
+        self.cv3 = Conv(c_, c2)
+
+    def forward(self, x):
+        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
+
+class yolovKKNet_backbone(nn.Module):
+    def __init__(self, num_classes=0):
+        super(yolovKKNet_backbone, self).__init__()
+        num_classes = 0
+        self.cv0 = nn.Sequential(
+                    ConvBlock_LN(3, 32, 6, 2, 2),
+                    ConvBlock_LN(32, 32*2, 3, 2, 1),
+                    C3(32*2, 32*2, 1, shortcut = True),
+                    ConvBlock_LN(32*2, 32*2*2, 3, 2, 1),
+                    C3(32*2*2, 32*2*2, 2, shortcut = True),
+                    )
+        self.cv1 = nn.Sequential(
+                    ConvBlock_LN(128, 128*2, 3, 2, 1),
+                    C3(128*2, 128*2, 3, shortcut = True),
+                    )
+        self.cv2 = nn.Sequential(
+                    ConvBlock_LN(128*2, 128*2*2, 3, 2, 1),
+                    C3(128*2*2, 128*2*2, 1, shortcut = True),
+                    SPPF(128*2*2, 128*2*2),
+                    ConvBlock_LN(128*2*2, 128*2, 1, 1, 0),
+                    )
+        self.up0 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear')
+        
+        self.c2f0 = nn.Sequential(C3(512, 128*2, 1), ConvBlock_LN(128*2, 128, 1, 1, 0),)
+        self.c2f1 = C3(256, 128, 1)
+        self.c2f2 = C3(256, 256, 1)
+        self.c2f3 = C3(512, 512, 1)
+        pk = 32
+        self.out0 = ConvBlock_LN(128, (5 + pk)*3, 1, 1, 0, act = False)
+        self.out1 = ConvBlock_LN(256, (5 + pk)*3, 1, 1, 0, act = False)
+        self.out2 = ConvBlock_LN(512, (5 + pk)*3, 1, 1, 0, act = False)
+        # self.concat2 = ConvBlock_LN(512, 512, 1, 1, 0)
+        # self.concat1 = ConvBlock_LN(256, 256, 1, 1, 0)
+        # self.concat0 = ConvBlock_LN(256, 256, 1, 1, 0)
+        self.concat2 = torch.nn.Identity()
+        self.concat1 = torch.nn.Identity()
+        self.concat0 = torch.nn.Identity()
+        self.y1_con = ConvBlock_LN(128, 128, 3, 2, 1)
+        self.y2_con = ConvBlock_LN(256, 256, 3, 2, 1)
+        self.p = Proto(100 + 10 + 10 + 2**3, c_=100 + 10 + 10+2**3)
+
+        self.kpt_shape = (16+1, 3)
+        self.ch = [256//2, 256, 512]
+        self.nk = self.kpt_shape[0] * self.kpt_shape[1] * 3  # number of keypoints total
+        c6 = max(self.ch[0] // (2*2), self.nk)
+        self.cv60 = nn.Sequential(Conv(self.ch[0], c6, 3), Conv(c6, c6*2, 3), Conv(c6*2, c6*2, 3, 1, 1), Conv(c6*2, c6, 3), nn.Conv2d(c6, self.nk, 1))
+        self.cv61 = nn.Sequential(Conv(self.ch[1], c6, 3), Conv(c6, c6*2, 3), Conv(c6*2, c6*2, 3, 1, 1), Conv(c6*2, c6, 3), nn.Conv2d(c6, self.nk, 1))
+        self.cv62 = nn.Sequential(Conv(self.ch[2], c6, 3), Conv(c6, c6*2, 3), Conv(c6*2, c6*2, 3, 1, 1), Conv(c6*2, c6, 3), nn.Conv2d(c6, self.nk, 1))
+    
+    def forward(self, x):
+        y0 = self.cv0(x)
+        y1 = self.cv1(y0)
+        y2 = self.cv2(y1)
+        
+        y1 = self.c2f0(torch.cat([y1, self.up0(y2)], dim = 1))
+        
+        y0 = self.concat0(torch.cat([y0, self.up1(y1)], dim = 1))
+        y0 = self.c2f1(y0)
+        poseky0 = self.cv60(y0)
+        prototype = self.p(y0)
+        
+        y1 = self.concat1(torch.cat([y1, self.y1_con(y0)], dim = 1))
+        y1 = self.c2f2(y1)
+        poseky1 = self.cv61(y1)
+        
+        y2 = self.concat2(torch.cat([y2, self.y2_con(y1)], dim = 1))
+        y2 = self.c2f3(y2)
+        poseky2 = self.cv62(y2)
+
+        y2_out = self.out2(y2)
+        y1_out = self.out1(y1)
+        y0_out = self.out0(y0)
+
+        # n = poseky0.size()[0]
+        # y0_out = torch.concat([y0_out, poseky0], dim=1)
+        # y1_out = torch.concat([y1_out, poseky1], dim=1)
+        # y2_out = torch.concat([y2_out, poseky2], dim=1)
+        # poseky0 = poseky0.view(n, self.nk//3, 3, poseky0.size()[-2], poseky0.size()[-1]).view(n, self.nk//3, -1)
+        # poseky1 = poseky1.view(n, self.nk//3, 3, poseky1.size()[-2], poseky1.size()[-1]).view(n, self.nk//3, -1)
+        # poseky2 = poseky2.view(n, self.nk//3, 3, poseky2.size()[-2], poseky2.size()[-1]).view(n, self.nk//3, -1)
+        # allkeypoint = torch.concat([poseky0, poseky1, poseky2], dim = -1).permute(0, 2, 1).contiguous()
+        # if not self.training:
+        #     allkeypoint = allkeypoint.view(n, -1, self.kpt_shape[0], self.kpt_shape[1])
+        #     allkeypoint[..., :2] = allkeypoint[..., :2] * 2
+        return (y0_out, poseky0), (y1_out, poseky1), (y2_out, poseky2), prototype  ##  small obj       middle obj         big obj,       prototype
+        # return (y0_out, poseky0), (y1_out, poseky1), (y2_out, poseky2), -1  ##  small obj       middle obj         big obj,       prototype
+
+# class yolovkkn_backbone(nn.Module):
+#     def __init__(self, num_classes):
+#         super(yolovkkn_backbone, self).__init__()
+#         self.cv0 = nn.Sequential(
+#                     ConvBlock_LN(3, 16, 3, 2, 1),
+#                     ConvBlock_LN(16, 32, 3, 2, 1),
+#                     C2f(32, 32, 1, shortcut = True),
+#                     ConvBlock_LN(32, 32*2, 3, 2, 1),
+#                     C2f(32*2, 32*2, 2, shortcut = True),
+#                     )
+#         self.cv1 = nn.Sequential(
+#                     ConvBlock_LN(32*2, 128, 3, 2, 1),
+#                     C2f(128, 128, 2, shortcut = True),
+#                     )
+#         self.cv2 = nn.Sequential(
+#                     ConvBlock_LN(128, 128*2, 3, 2, 1),
+#                     C2f(128*2, 128*2, 1, shortcut = True),
+#                     SPPF(128*2, 128*2),
+#                     )
+#         self.up0 = nn.Upsample(scale_factor=2, mode='bilinear')
+#         self.up1 = nn.Upsample(scale_factor=2, mode='bilinear')
+        
+#         self.c2f0 = C2f(360 + 20 + 2*2, 128, 1)
+#         self.c2f1 = C2f(192, 32*2, 1)
+#         self.c2f2 = C2f(192, 128, 1)
+#         self.c2f3 = C2f(360 + 20 + 2*2, 256, 1)
+#         self.connect00 = nn.Sequential(
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect01 = nn.Sequential(
+#                         ConvBlock_LN(32*2, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.connect10 = nn.Sequential(
+#                         ConvBlock_LN(128, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect11 = nn.Sequential(
+#                         ConvBlock_LN(128, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.connect20 = nn.Sequential(
+#                         ConvBlock_LN(128*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 3, 1, 1),
+#                         ConvBlock_LN(32*2, 32*2, 1, 1, 0, act=False),
+#                        )
+#         self.connect21 = nn.Sequential(
+#                         ConvBlock_LN(128*2, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 3, 1, 1),
+#                         ConvBlock_LN((2**3)*10, (2**3)*10, 1, 1, 0, act=False),
+#                        )
+#         self.y1_con = ConvBlock_LN(32*2, 32*2, 3, 2, 1)
+#         self.y2_con = ConvBlock_LN(128, 128, 3, 2, 1)
+    
+#     def forward(self, x):
+#         y0 = self.cv0(x)
+#         y1 = self.cv1(y0)
+#         y2 = self.cv2(y1)
+        
+#         k = self.up0(y2)
+#         y1 = self.c2f0(torch.cat([y1, self.up0(y2)], dim = 1))
+#         y0 = self.c2f1(torch.cat([y0, self.up1(y1)], dim = 1))
+#         y1 = self.c2f2(torch.cat([y1, self.y1_con(y0)], dim = 1))
+#         y2 = self.c2f3(torch.cat([y2, self.y2_con(y1)], dim = 1))
+#         y2_out = torch.cat([self.connect20(y2), self.connect21(y2)], dim = 1)
+#         y1_out = torch.cat([self.connect10(y1), self.connect11(y1)], dim = 1)
+#         y0_out = torch.cat([self.connect00(y0), self.connect01(y0)], dim = 1)
+        
+#         return y0_out, y1_out, y2_out  ##  small obj       middle obj         big obj
+        
+class YolovKKNet(nn.Module):
+    def __init__(self, num_classes, anchors, device, imgsize):
+        super(YolovKKNet, self).__init__()
+        self.num_classes = num_classes
+        self.device = device
+        self.imgsize = imgsize
+        self.anchors = anchors
+        self.yolo = [yololayer_segKeyPoint(self.device, len(self.anchors[0]), self.num_classes) for _ in range(len(anchors))]
+        self.anchors_sparse = [torch.tensor(anchors[i]).float().view(-1, 2).view(1, -1, 1, 1, 2).to(device) for i in range(len(anchors))]
+        self.yolovKKNet_backbone = yolovKKNet_backbone(num_classes)
+        self.yolovKKNet_backbone = self.yolovKKNet_backbone.to(device)
+
+    def forward(self, x, yolovfive = False):
+        out = self.yolovKKNet_backbone(x)                   #            [small obj   middle obj   big obj prototype]
+        prediction = [self.yolo[i](out[i], self.anchors_sparse[i], self.imgsize, yolovfive = yolovfive) for i in range(len(out)-1)] + [out[-1]]
+        if self.training:
+            return prediction # prediction, anchors
+        else:
+            kee = []
+            keypoint = []
+            # stridek = torch.tensor([], dtype = torch.float32).to(self.device)
+            # anchors = []
+            # strides = [2**3, 2**(2*2), 2**(2*2+1)]
+            # for i in range(len(self.yolo)):
+            #     num = prediction[i][0].size()[1]
+            #     anc = prediction[i][1]
+            #     anchors.append(anc)
+            #     stridek = torch.concat([stridek, torch.ones(num).to(self.device) * strides[i]], dim = 0)
+            # anchors = torch.concat(anchors, dim=(0)).float()
+            # keypoint = out[-1]
+            
+            # keypoint[..., 0] = (keypoint[..., 0] + ((anchors[:, 2] - anchors[:, 0]) / stridek - 0.6 + 0.1).unsqueeze(-1).unsqueeze(0)) * stridek.unsqueeze(-1).unsqueeze(0)
+            # keypoint[..., 1] = (keypoint[..., 1] + ((anchors[:, 2+1] - anchors[:, 1]) / stridek - 0.6 + 0.1).unsqueeze(-1).unsqueeze(0)) * stridek.unsqueeze(-1).unsqueeze(0)
+            # keypoint[..., 2] = keypoint[..., 2].sigmoid()
+            for i in range(len(prediction)-1):
+                kee.append(prediction[i][0])
+                keypoint.append(prediction[i][2])
+            return (torch.cat(kee, 1), torch.cat(keypoint, 1), out[-1])
+
+# def iou_p_g(groundtruth, predict):
+#     cx, cy, w, h = groundtruth[:, 0], groundtruth[:, 1],groundtruth[:, 2],groundtruth[:, 3]
+#     cxp, cyp, wp, hp = predict[:, 0], predict[:, 1], predict[:, 2], predict[:, 3]
+#     xmin = cx - w/2
+#     ymin = cy - h/2
+#     xmax = cx + w/2
+#     ymax = cy + h/2
+
+#     xminp = cxp - wp/2
+#     yminp = cyp - hp/2
+#     xmaxp = cxp + wp/2
+#     ymaxp = cyp + hp/2
+#     alliou = torch.zeros((predict.size()[0], groundtruth.size()[0]))
+#     for i in range(groundtruth.size()[0]):
+#         singleiou = []
+#         join = (torch.min(xmax[i], xmaxp) - torch.max(xmin[i], xminp)).clamp(0)*\
+#             (torch.min(ymax[i], ymaxp) - torch.max(ymin[i], yminp)).clamp(0)
+#         gtarea = (xmax[i] - xmin[i])*(ymax[i] - ymin[i])
+#         parea = (xmaxp - xminp)*(ymaxp - yminp)
+#         iouresult = join/(gtarea+parea-join)
+#         alliou[:, i] = iouresult
+#     return alliou
+
+# def iou_box(groundtruth, predict):
+#     cx, cy, w, h = groundtruth[:, 0], groundtruth[:, 1],groundtruth[:, 2],groundtruth[:, 3]
+#     cxp, cyp, wp, hp = predict[:, 0], predict[:, 1], predict[:, 2], predict[:, 3]
+#     xmin = cx - w/2
+#     ymin = cy - h/2
+#     xmax = cx + w/2
+#     ymax = cy + h/2
+
+#     xminp = cxp - wp/2
+#     yminp = cyp - hp/2
+#     xmaxp = cxp + wp/2
+#     ymaxp = cyp + hp/2
+
+#     join = (torch.min(xmax, xmaxp) - torch.max(xmin, xminp))*\
+#         (torch.min(ymax, ymaxp) - torch.max(ymin, yminp))
+#     gtarea = (xmax - xmin)*(ymax - ymin)
+#     parea = (xmaxp - xminp)*(ymaxp - yminp)
+#     iouresult = join/(gtarea+parea-join)
+#     return iouresult
+
+# def iouwh(batch_gt00wh, anchor00wh): 
+#     #定义两者的中心点坐标重合，只要考虑长和宽，不妨定中心点(x, y) = (90, 90)，实际不会是0
+#     #做了inner全连接
+#     assume = torch.ones(batch_gt00wh.size()[0])*90
+#     if torch.cuda.is_available():
+#         assume = assume.to("cuda")
+#     gtw, gth = batch_gt00wh[:, 0], batch_gt00wh[:, 1]
+#     anchorw, anchorh = anchor00wh[:, 0], anchor00wh[:, 1]
+#     xmingt = assume - gtw/2
+#     ymingt = assume - gth/2
+#     xmaxgt = assume + gtw/2
+#     ymaxgt = assume + gth/2
+
+#     xminan = assume - anchorw/2
+#     yminan = assume - anchorh/2
+#     xmaxan = assume + anchorw/2
+#     ymaxan = assume + anchorh/2
+#     join = (torch.min(xmaxgt, xmaxan) - torch.max(xmingt, xminan)).clamp(0)*\
+#         (torch.min(ymaxgt, ymaxan) - torch.max(ymingt, yminan)).clamp(0)
+#     gtarea = (xmaxgt - xmingt)*(ymaxgt - ymingt)
+#     anchorarea = (xmaxan - xminan)*(ymaxan - yminan)
+#     iouresult = join/(gtarea+anchorarea-join)
+#     length = iouresult.size()[0]//9
+#     #对全连接进行合并
+#     res1 = torch.unsqueeze(iouresult[:length], 1)
+#     res2 = torch.unsqueeze(iouresult[length:length*2], 1)
+#     res3 = torch.unsqueeze(iouresult[length*2:length*3], 1)
+#     res4 = torch.unsqueeze(iouresult[length*3:length*4], 1)
+#     res5 = torch.unsqueeze(iouresult[length*4:length*5], 1)
+#     res6 = torch.unsqueeze(iouresult[length*5:length*6], 1)
+#     res7 = torch.unsqueeze(iouresult[length*6:length*7], 1)
+#     res8 = torch.unsqueeze(iouresult[length*7:length*8], 1)
+#     res9 = torch.unsqueeze(iouresult[length*8:], 1)
+#     result = torch.cat([res1, res2, res3,\
+#         res4, res5, res6,\
+#         res7, res8, res9], dim=1) #[gt的数量, 3]，3代表3个anchor，也就是特征图的3层
+#     return result
+
+# def nms(predict, nms_thresh):
+#     #[cx, cy, w, h, maxscore, label]
+#     if len(predict)==0:
+#         return []
+#     index  = np.argsort(predict[:, 4])
+#     index = list(index)
+#     index.reverse()
+#     predict = predict[index]
+#     xmin = predict[:, 0] - predict[:, 2]/2
+#     ymin = predict[:, 1] - predict[:, 3]/2
+#     xmax = predict[:, 0] + predict[:, 2]/2
+#     ymax = predict[:, 1] + predict[:, 3]/2
+#     areas = (ymax - ymin)*(xmax - xmin)
+#     labeles = np.unique(predict[:, 5])
+#     keep = []
+#     # print(predict, predict.shape)
+#     for j in range(len(labeles)):
+#         ind = np.where(predict[:, 5]==labeles[j])[0]
+#         if len(ind)==0:
+#             continue
+#         # if len(ind)!=1:
+#         #     print(ind)
+#         while len(ind)>0:
+#             i = ind[0]
+#             keep.append(i)
+
+#             x1min = np.maximum(xmin[i], xmin[ind[1:]])
+#             y1min = np.maximum(ymin[i], ymin[ind[1:]])
+#             x1max = np.minimum(xmax[i], xmax[ind[1:]])
+#             y1max = np.minimum(ymax[i], ymax[ind[1:]])
+#             overlap = np.maximum(0, (y1max-y1min))*np.maximum(0, (x1max-x1min))
+
+#             ioures = overlap/(areas[i] + areas[ind[1:]] - overlap)
+#             # t = np.where(ioures <= nms_thresh)[0]
+#             maskiou = ioures<= nms_thresh
+#             if len(maskiou)==0:
+#                 break
+#             # print(1111111, ind)
+#             ind = ind[1:][ioures <= nms_thresh]
+#             # print(ioures <= nms_thresh, ind)
+#     # print(3333333, keep)
+#     return predict[keep]
+
+# def box_iou(box1, box2):
+#     # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
+#     """
+#     Return intersection-over-union (Jaccard index) of boxes.
+#     Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
+#     Arguments:
+#         box1 (Tensor[N, 4])
+#         box2 (Tensor[M, 4])
+#     Returns:
+#         iou (Tensor[N, M]): the NxM matrix containing the pairwise
+#             IoU values for every element in boxes1 and boxes2
+#     """
+
+#     def box_area(box):
+#         # box = 4xn
+#         return (box[2] - box[0]) * (box[3] - box[1])
+
+#     area1 = box_area(box1.T)
+#     area2 = box_area(box2.T)
+
+#     # inter(N,M) = (rb(N,M,2) - lt(N,M,2)).clamp(0).prod(2)
+#     inter = (torch.min(box1[:, None, 2:], box2[:, 2:]) - torch.max(box1[:, None, :2], box2[:, :2])).clamp(0).prod(2)
+#     return inter / (area1[:, None] + area2 - inter)  # iou = inter / (area1 + area2 - inter)
+
+# def GIOU_xywh_torch(boxes1, boxes2):
+#     """
+#      https://arxiv.org/abs/1902.09630
+#      https://github.com/Peterisfar/YOLOV3/blob/master/utils/tools.py#L199
+#     boxes1(boxes2)' shape is [..., (x,y,w,h)].The size is for original image.
+#     """
+#     # xywh->xyxy
+#     boxes1 = torch.cat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+#                         boxes1[..., :2] + boxes1[..., 2:] * 0.5], dim=-1)
+#     boxes2 = torch.cat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+#                         boxes2[..., :2] + boxes2[..., 2:] * 0.5], dim=-1)
+
+#     boxes1 = torch.cat([torch.min(boxes1[..., :2], boxes1[..., 2:]),
+#                         torch.max(boxes1[..., :2], boxes1[..., 2:])], dim=-1)
+#     boxes2 = torch.cat([torch.min(boxes2[..., :2], boxes2[..., 2:]),
+#                         torch.max(boxes2[..., :2], boxes2[..., 2:])], dim=-1)
+
+#     boxes1_area = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
+#     boxes2_area = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
+
+#     inter_left_up = torch.max(boxes1[..., :2], boxes2[..., :2])
+#     inter_right_down = torch.min(boxes1[..., 2:], boxes2[..., 2:])
+#     inter_section = torch.max(inter_right_down - inter_left_up, torch.zeros_like(inter_right_down))
+#     inter_area =  inter_section[..., 0] * inter_section[..., 1]
+#     union_area = boxes1_area + boxes2_area - inter_area
+#     IOU = 1.0 * inter_area / union_area
+
+#     enclose_left_up = torch.min(boxes1[..., :2], boxes2[..., :2])
+#     enclose_right_down = torch.max(boxes1[..., 2:], boxes2[..., 2:])
+#     enclose_section = torch.max(enclose_right_down - enclose_left_up, torch.zeros_like(enclose_right_down))
+#     enclose_area = enclose_section[..., 0] * enclose_section[..., 1]
+
+#     GIOU = IOU - 1.0 * (enclose_area - union_area) / enclose_area
+#     return GIOU
+
+
+# def iou_xywh_torch(boxes1, boxes2):
+#     """
+#     :param boxes1: boxes1和boxes2的shape可以不相同，但是需要满足广播机制，且需要是Tensor
+#     :param boxes2: 且需要保证最后一维为坐标维，以及坐标的存储结构为(x, y, w, h)
+#     :return: 返回boxes1和boxes2的IOU，IOU的shape为boxes1和boxes2广播后的shape[:-1]
+#     """
+#     boxes1_area = boxes1[..., 2] * boxes1[..., 3]
+#     boxes2_area = boxes2[..., 2] * boxes2[..., 3]
+
+#     # 分别计算出boxes1和boxes2的左上角坐标、右下角坐标
+#     # 存储结构为(xmin, ymin, xmax, ymax)，其中(xmin,ymin)是bbox的左上角坐标，(xmax,ymax)是bbox的右下角坐标
+#     boxes1 = torch.cat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+#                         boxes1[..., :2] + boxes1[..., 2:] * 0.5], dim=-1)
+#     boxes2 = torch.cat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+#                         boxes2[..., :2] + boxes2[..., 2:] * 0.5], dim=-1)
+
+#     # 计算出boxes1与boxes1相交部分的左上角坐标、右下角坐标
+#     left_up = torch.max(boxes1[..., :2], boxes2[..., :2])
+#     right_down = torch.min(boxes1[..., 2:], boxes2[..., 2:])
+
+#     # 因为两个boxes没有交集时，(right_down - left_up) < 0，所以maximum可以保证当两个boxes没有交集时，它们之间的iou为0
+#     inter_section = torch.max(right_down - left_up, torch.zeros_like(right_down))
+#     inter_area = inter_section[..., 0] * inter_section[..., 1]
+#     union_area = boxes1_area + boxes2_area - inter_area
+#     IOU = 1.0 * inter_area / union_area
+#     return IOU
+
+# class yolo(nn.Module):
+#     '''
+#     对输出的特征图进行解码，得到坐标、置信度、分类的概率
+#     并计算相应的objectness loss、classify loss、coordinates loss
+#     '''
+#     def __init__(self, anchors, stride, mask, device):
+#         super(yolo, self).__init__()
+#         self.FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+#         self.LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+#         self.anchors = self.FloatTensor(anchors)
+#         self.ori_anchors = self.FloatTensor(anchors)
+#         self.stride = stride
+#         self.mask = mask
+#         self.device = device
+
+#         self.sigmoid = nn.Sigmoid()
+#         self.anchors_g = self.anchors[self.mask]/self.stride
+
+#     def forward(self, prediction):
+#         batch_size, channel, width, height = prediction.size() #batch_size, (5+num_classes)*3, width, height
+
+#         #prediction [2, 75, 13, 13]
+#         prediction = prediction.view((batch_size, width, height, 3, -1)) #[2, 13, 13, 3, 25]
+#         #x、y偏移量，w、h缩放值，confp置信度，classesp分类
+#         cxp = self.sigmoid(prediction[:, :, :, :, 0]).to(self.device)     #[2, 13, 13, 3]
+#         cyp = self.sigmoid(prediction[:, :, :, :, 1]).to(self.device)      #[2, 13, 13, 3]
+#         wp = prediction[:, :, :, :, 2].to(self.device)     #[2, 3, 13, 13]
+#         hp = prediction[:, :, :, :, 3].to(self.device)     #[2, 3, 13, 13]
+#         confp = self.sigmoid(prediction[:, :, :, :, 4]).to(self.device)     #[2, 13, 13, 3]
+#         classesp = self.sigmoid(prediction[:, :, :, :, 5:]).to(self.device)     #[2, 13, 13, 3, 20]
+
+#         #预测出来的坐标点的位置，加上偏移量即可
+#         mask_anchor_w = torch.reshape(self.anchors_g[:, 0], (1, 1, 1, 3))  #(1, 1, 1, 3)
+#         mask_anchor_h = torch.reshape(self.anchors_g[:, 1], (1, 1, 1, 3))  #(1, 1, 1, 3)
+#         x_coord = torch.arange(width).repeat(height, 1).to(self.device)    #[13, 13]
+#         y_coord = torch.transpose((torch.arange(height).repeat(width, 1)), 0, 1).to(self.device)     #[13, 13]
+#         x_coord = torch.unsqueeze(torch.unsqueeze(x_coord, 0),3).to(self.device)    #[1, 13, 13, 1]
+#         y_coord = torch.unsqueeze(torch.unsqueeze(y_coord, 0),3).to(self.device)    #[1, 13, 13, 1]
+#         predx = ((cxp + x_coord) * self.stride).to(self.device)    #放到原图尺寸416x416  #[2, 13, 13, 3]
+#         predy = ((cyp + y_coord) * self.stride).to(self.device)     #[2, 13, 13, 3]
+#         predw = ((torch.exp(wp) * mask_anchor_w) * self.stride).to(self.device)      #[2, 13, 13, 3]
+#         predh = ((torch.exp(hp) * mask_anchor_h) * self.stride).to(self.device)     #[2, 13, 13, 3]
+
+#         return predx, predy, predw, predh, confp, classesp, \
+#                cxp, cyp, wp, hp, prediction[:, :, :, :, 4], prediction[:, :, :, :, 5:]
+
+# class lossyolo(nn.Module):
+#     def __init__(self, iouthresh, ignore_threshold, stride, device, inputwidth):
+#         super(lossyolo, self).__init__()
+#         self.stride = stride
+#         self.ignore_threshold = ignore_threshold
+#         self.iouthresh = iouthresh
+#         self.device = device
+#         self.inputwidth = inputwidth
+#         self.BCElog = nn.BCEWithLogitsLoss(reduction='none').to(self.device)
+#         self.MSE = nn.MSELoss(reduction='none').to(self.device)
+
+#     def forward(self, label_sbbox, label_mbbox, label_lbbox, sbbox, mbbox, lbbox, \
+#                            p, p_d):
+#         L_loss, L_loss_giou, L_loss_conf, L_loss_cls, Lrecall50, Lrecall75, Lnum_ins, Lobj, Lnoobj = \
+#             self.__cal_per_layer_loss(label_lbbox, lbbox, p[0], p_d[0], self.stride[0])
+#         M_loss, M_loss_giou, M_loss_conf, M_loss_cls, Mrecall50, Mrecall75, Mnum_ins, Mobj, Mnoobj = \
+#             self.__cal_per_layer_loss(label_mbbox, mbbox, p[1], p_d[1], self.stride[1])
+#         S_loss, S_loss_giou, S_loss_conf, S_loss_cls, Srecall50, Srecall75, Snum_ins, Sobj, Snoobj = \
+#             self.__cal_per_layer_loss(label_sbbox, sbbox, p[2], p_d[2], self.stride[2])
+
+#         loss = L_loss + M_loss + S_loss
+#         loss_giou = L_loss_giou + M_loss_giou + S_loss_giou
+#         loss_conf = L_loss_conf + M_loss_conf + S_loss_conf
+#         loss_cls  = L_loss_cls  + M_loss_cls  + S_loss_cls
+
+#         ins = (Lnum_ins + Mnum_ins + Snum_ins)
+#         recall50  = (Lrecall50 + Mrecall50 + Srecall50)/ins
+#         recall75  = (Lrecall75 + Mrecall75 + Srecall75)/ins
+#         obj = (Lobj + Mobj + Sobj)/ins
+#         noobj = (Lnoobj + Mnoobj + Snoobj)/3
+
+#         return loss, loss_giou.item(), loss_conf.item(), loss_cls.item(), \
+#             recall50.item(), recall75.item(), obj.item(), noobj
+        
+#     def __cal_per_layer_loss(self, label_bbox, bbox, p, p_d, stride):
+#         label_bbox = label_bbox.to(self.device)
+#         bbox = bbox.to(self.device)
+#         # predx, predy, predw, predh, confp, classesp, \
+#         #             cxp, cyp, wp, hp, confp_ori, classesp_ori = predict
+#         batch_size, grid = p.shape[:2]
+#         imgsize = grid * stride
+
+#         assert imgsize==self.inputwidth
+
+#         confp_ori = p[..., 4:5]
+#         classesp_ori = p[..., 5:]
+
+#         predxywh = p_d[..., :4]
+#         confp = p_d[..., 4]
+
+#         label_xywh = label_bbox[..., :4]
+#         label_obj_mask = label_bbox[..., 4]
+#         label_cls  = label_bbox[..., 5:]
+
+#         giou = GIOU_xywh_torch(predxywh, label_xywh)
+#         bbox_loss_scale = 2.0 - 1.0 * label_xywh[..., 2] * label_xywh[..., 3] / (imgsize ** 2)
+#         lossgiou = label_obj_mask * bbox_loss_scale * (1.0 - giou)
+#         lossgiou = lossgiou.unsqueeze(-1)
+
+#         iou = iou_xywh_torch(predxywh.unsqueeze(4), bbox.unsqueeze(1).unsqueeze(1).unsqueeze(1))
+#         ioumax = iou.max(-1, keepdim=True)[0].squeeze(-1)
+#         label_noobj_mask = (1 - label_obj_mask) * (ioumax < self.ignore_threshold).float()
+#         label_noobj_mask.to(self.device)
+
+#         midconf = self.BCElog(confp_ori.squeeze(), label_obj_mask) * (torch.pow(torch.abs(label_obj_mask - torch.sigmoid(confp_ori.squeeze())), 2))
+#         lossconf = label_obj_mask * midconf + label_noobj_mask * midconf
+
+#         losscls = label_obj_mask.unsqueeze(-1) * self.BCElog(classesp_ori.squeeze(), label_cls)
+
+#         loss_giou = torch.sum(lossgiou)/batch_size
+#         loss_conf = torch.sum(lossconf)/batch_size
+#         loss_cls  = torch.sum(losscls)/batch_size
+
+#         loss = loss_giou + loss_conf + loss_cls
+
+#         Recall = label_obj_mask * ioumax
+#         recall50 = torch.sum(Recall > 0.5)
+#         recall75 = torch.sum(Recall > 0.75)
+#         num_ins = torch.sum(label_obj_mask)
+        
+#         noobj = torch.mean(label_noobj_mask * confp).item()
+#         if(torch.sum(label_obj_mask).item()==0):
+#             obj = 0
+#         else:
+#             obj = torch.sum(label_obj_mask * confp).item()
+#         return loss, loss_giou, loss_conf, loss_cls, recall50, recall75, num_ins, obj, noobj
+
+            #     predict = []
+            #     feature_scale = predx.size()[-1] #13、26、52
+            #     batch_size = predx.size()[0]
+            #     for bs in range(batch_size):
+            #         for an in range(3):
+            #             for i in range(feature_scale):
+            #                 for j in range(feature_scale):
+            #                     scoresp = classesp[bs, an, :, j, i]*confp[bs, an, j, i]
+            #                     labelp = torch.argmax(scoresp).item()
+            #                     scoresmaxp = torch.max(scoresp).item()
+            #                     if scoresmaxp>self.score_thresh:
+            #                         predict.append([predx[bs,an,j,i].item(), predy[bs,an,j,i].item(), \
+            #                             predw[bs,an,j,i].item(), predh[bs,an,j,i].item(),\
+            #                                 scoresmaxp, labelp])
+            #     predict = np.array(predict)
+            #     predict = nms(predict, self.nms_thresh)
+            #     prediction.extend(predict)
+            #     print('after nms: ', len(predict))
+            # prediction = np.array(prediction)
+            # print('all: ',prediction.shape)
+            # return prediction, 2,  2,  2,  2,  2
+
+if __name__ == '__main__':
+    num_classes = 20 #voc2007存在20类
+    inputwidth = 416
+    anchors = [[10,13], [16,30], [33,23],\
+        [30,61],  [62,45],  [59,119],  \
+        [116,90],  [156,198],  [373,326]]
+    ignore_thresh = 0.7 #iou小于0.7的看作负样本，只计算confidence的loss
+    score_thresh = 0.45
+    nms_thresh = 0.35
+    image, gt = getdata()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    yolov3 = Yolov3(num_classes, anchors, ignore_thresh, inputwidth,device,\
+        score_thresh = score_thresh, nms_thresh = nms_thresh)
+    result3, result2, result1, precision50, recall50, recall75 = yolov3(image, gt)
+    print(result3, result2, result1, precision50, recall50, recall75)

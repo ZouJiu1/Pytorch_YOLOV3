@@ -56,6 +56,141 @@ def cvshow_(image, label):
         counts += 1
 
 
+
+counts=0
+def cvshow_seg(image, label, masks):
+    import cv2
+    import numpy as np
+    global counts
+    savepath = os.path.join(abspath, 'datas', 'seg')
+    for i in os.listdir(savepath):
+        os.remove(os.path.join(savepath, i))
+    lis = [[] for ij in range(image.size()[0])]
+    # classes = ['person', 'car']
+    for j in range(label.size()[0]):
+        lab = int(label[j][0])
+        cla = int(label[j][1])
+        xmin = inputwidth * (label[j][2] - label[j][4]/2)
+        ymin = inputwidth * (label[j][3] - label[j][5]/2)
+        xmax = inputwidth * (label[j][2] + label[j][4]/2)
+        ymax = inputwidth * (label[j][3] + label[j][5]/2)
+        lis[lab].append([cla, int(xmin), int(ymin), int(xmax), int(ymax)])
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for j in range(image.size()[0]):
+        img = image[j].detach().cpu().numpy()
+        img = np.transpose(img, (1, 2, 0))
+        img = np.array(img*255, dtype=np.uint8)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        for ij in range(len(masks)):
+            kk = label[:, 0].long()==j
+            if not kk[ij]:
+                continue
+            ij = masks[ij].cpu().numpy()
+            ijb = ij * 200
+            ij = np.stack([ijb, ij, ij])
+            ij = np.transpose(ij, (1, 2, 0))
+            
+            # cv2.imshow('img', ij)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
+            
+            ij = cv2.resize(ij, (32*16, 32*16), interpolation=cv2.INTER_NEAREST)
+            img[ij > 0] = img[ij > 0] * 0.6
+            img = img + ij * 0.39
+
+        for ij in lis[j]:
+            print(ij, img.shape)
+            cv2.rectangle(img, (ij[1], ij[2]), (ij[3], ij[4]), [0, 0, 128], 1)
+            cv2.putText(img, classes[ij[0]], (ij[1], ij[2]),
+                        font, 0.6, (128, 0, 128), 1)
+        # cv2.imshow('img', img)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+        cv2.imwrite(os.path.join(savepath, str(counts) + '.jpg'), img)
+        counts += 1
+
+
+counts=0
+def cvshow_seg_kpt(image, label, masks, keypoints):
+    import cv2
+    import numpy as np
+    keypoints[..., 0] *= 32*16
+    keypoints[..., 1] *= 32*16
+    keypoints = np.asarray(keypoints, dtype=np.int32)
+
+    global counts
+    savepath = os.path.join(abspath, 'datas', 'seg')
+    for i in os.listdir(savepath):
+        os.remove(os.path.join(savepath, i))
+    lis = [[] for ij in range(image.size()[0])]
+    # classes = ['person', 'car']
+    for j in range(label.size()[0]):
+        lab = int(label[j][0])
+        cla = int(label[j][1])
+        xmin = inputwidth * (label[j][2] - label[j][4]/2)
+        ymin = inputwidth * (label[j][3] - label[j][5]/2)
+        xmax = inputwidth * (label[j][2] + label[j][4]/2)
+        ymax = inputwidth * (label[j][3] + label[j][5]/2)
+        lis[lab].append([cla, int(xmin), int(ymin), int(xmax), int(ymax)])
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for j in range(image.size()[0]):
+        img = image[j].detach().cpu().numpy()
+        img = np.transpose(img, (1, 2, 0))
+        img = np.array(img*255, dtype=np.uint8)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        kk = label[:, 0].long()==j
+        for ij in range(len(masks)):
+            if not kk[ij]:
+                continue
+            ij = masks[ij].cpu().numpy()
+            ij = np.array(ij, dtype=np.float32)
+            ijb = ij * 200
+            ij = np.stack([ijb, ij, ij])
+            ij = np.transpose(ij, (1, 2, 0))
+            
+            # cv2.imshow('img', ij)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
+            
+            ij = cv2.resize(ij, (32*16, 32*16), interpolation=cv2.INTER_NEAREST)
+            img[ij > 0] = img[ij > 0] * 0.6
+            img = img + ij * 0.39
+
+        for ij in lis[j]:
+            print(ij, img.shape)
+            cv2.rectangle(img, (ij[1], ij[2]), (ij[3], ij[4]), [0, 0, 128], 1)
+            cv2.putText(img, classes[ij[0]], (ij[1], ij[2]),
+                        font, 0.6, (128, 0, 128), 1)
+        for ij in range(len(keypoints)):
+            if not kk[ij]:
+                continue
+            kptinst = keypoints[ij]
+            kptcolor = [[  0, 255,   0],[  0, 255,   0],[  0, 255,   0],[  0, 255,   0],[  0, 255,   0],[255, 128,   0],[255, 128,   0],
+                        [255, 128,   0],[255, 128,   0],[255, 128,   0],[255, 128,   0],[ 51, 153, 255],
+                        [ 51, 153, 255],[ 51, 153, 255],[ 51, 153, 255],[ 51, 153, 255],[ 51, 153, 255]]
+            for ijw in range(len(kptinst)):
+                kpt = kptinst[ijw]
+                if kpt[-1]==0:
+                    continue
+                cv2.circle(img, (kpt[0], kpt[1]), 3, kptcolor[ijw], 1)
+            skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12], [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
+            skeleton_color = [[ 51, 153, 255],[ 51, 153, 255],[ 51, 153, 255],[ 51, 153, 255],[255,  51, 255],[255,  51, 255],[255,  51, 255],
+                              [255, 128,   0],[255, 128,   0],[255, 128,   0],[255, 128,   0],[255, 128,   0],[  0, 255,   0],[  0, 255,   0],
+                              [  0, 255,   0],[  0, 255,   0],[  0, 255,   0],[  0, 255,   0],[  0, 255,   0]]
+            for ind, ske in enumerate(skeleton):
+                pot1 = (kptinst[ske[0] - 1][0], kptinst[ske[0] - 1][1])
+                pot2 = (kptinst[ske[1] - 1][0], kptinst[ske[1] - 1][1])
+                if kptinst[ske[0] - 1][2]==0 or kptinst[ske[1] - 1][2]==0:
+                    continue
+                cv2.line(img, pot1, pot2, skeleton_color[ind], 1)
+        # cv2.imshow('img', img)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+        cv2.imwrite(os.path.join(savepath, str(counts) + '.jpg'), img)
+        counts += 1
+
 counts = 0
 
 def cvshow(image, label):
@@ -96,6 +231,8 @@ def smart_optimizer(model, name='Adam', lr=0.001, momentum=0.9, decay=1e-5):
     bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
     for v in model.modules():
         for p_name, p in v.named_parameters(recurse=0):
+            if not p.requires_grad:
+                continue
             if p_name == 'bias':  # bias (no decay)
                 g[2].append(p)
             elif p_name == 'weight' and isinstance(v, bn):  # weight (no decay)
@@ -174,6 +311,40 @@ def collate_fn(batch):
     images = torch.stack(img)
     labels = torch.cat(label, 0)
     return images, labels, image_id
+
+def collate_fnseg(batch):
+    batch = [i for i in batch if i is not None]
+    # print(batch)
+    img, label, masks, image_id = list(zip(*batch))  # transposed
+    # print(len(label))
+    for i, l in enumerate(label):
+        l[:, 0] = i
+    retmask = []
+    for i, m in enumerate(masks):
+        retmask.extend(m)
+    images = torch.stack(img)
+    labels = torch.cat(label, 0)
+    retmask = torch.stack(retmask)
+    return images, labels, retmask, image_id
+
+def collate_fnseg_keypoint(batch):
+    batch = [i for i in batch if i is not None]
+    # print(batch)
+    img, label, masks, keypoint, image_id = list(zip(*batch))  # transposed
+    # print(len(label))
+    for i, l in enumerate(label):
+        l[:, 0] = i
+    retmask = []
+    for i, m in enumerate(masks):
+        retmask.extend(m)
+    retkpt = []
+    for i, m in enumerate(keypoint):
+        retkpt.extend(m)
+    images = torch.stack(img)
+    labels = torch.cat(label, 0)
+    retmask = torch.stack(retmask)
+    retkpt = torch.stack(retkpt)
+    return images, labels, retmask, retkpt, image_id
 
 def collate_fn_tails(batch):
     batch = [i for i in batch if i is not None]

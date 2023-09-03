@@ -3,7 +3,7 @@
 #Time: 2022-12-10
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '-1'
 
 abspath = os.path.abspath(__file__)
 filename = os.sep.join(abspath.split(os.sep)[-2:])
@@ -17,18 +17,18 @@ import torch
 import datetime
 import numpy as np
 from copy import deepcopy
-from models.Yolovkkn import YolovKKNet
+from models.Yolovkkn_seg_keypoint import YolovKKNet
 # from models.layer_loss_20230816 import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
-from models.layer_loss import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
+from models.layer_loss_segment_keypoint import calculate_losses_darknet, calculate_losses_Alexeydarknet, calculate_losses_yolofive, \
     calculate_losses_darknetRevise, calculate_losses_20230730, calculate_losses_yolofive_revise
 # , calculate_losses_yolofive_original
 import torch.optim as optim
-from utils.common import cvshow_, collate_fn, provide_determinism, smart_optimizer, ModelEMA, de_parallel
-from utils.validation_yolov3tiny import validation_map
+from utils.common import cvshow_seg_kpt, collate_fnseg_keypoint, provide_determinism, smart_optimizer, ModelEMA, de_parallel
+from utils.validation_yolov3tiny import validation_map_segkeypoint
 from torch.utils.data import Dataset, DataLoader
 # from loaddata.load_datas_yolov3tiny import trainDataset
-from loaddata.cocoread import trainDataset
-from config.config_yolovKKn import *
+from loaddata.cocoread_seg_keypoint import trainDataset
+from config.config_yolovKKn_seg_keypoint import *
 from multiprocessing import cpu_count
 from utils.evaluate_yolov3tiny import evaluation
 import math
@@ -40,7 +40,7 @@ import tqdm
 def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
               momnetum, learning_rate):
     steps0 = num_batch * warmepoch
-    final_lr = 0.01
+    final_lr = 0.1
     baselr = learning_rate
     nbk = 2**6  # nominal batch size
     lf = lambda k : 1 + ((final_lr - 1) / (num_epochs - 1)) * (k - 1)
@@ -107,17 +107,17 @@ def adjust_lr(optimizer, stepiters, epoch, num_batch, num_epochs, batch_size, \
     return lr
 
 def trainer():
-    seed = 612387967
+    seed = 612387966
     provide_determinism(seed)
-    torch.cuda.manual_seed_all(612387967)
-    torch.manual_seed(612387967)
+    torch.cuda.manual_seed_all(seed)
+    torch.manual_seed(seed)
     #pip3 install --user --upgrade opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple
     traindata = trainDataset(trainpath, train_imgpath, stride = strides, anchors = anchors, \
-                             augment = False, inputwidth = inputwidth, transform=TF)
+                             augment = True, inputwidth = inputwidth, transform=TFRESIZE)
     count_scale = traindata.count_scale.to(device)
 
     flogs = open(logfile, 'w')
-    model = YolovKKNet(num_classes, anchors, device, inputwidth)
+    model = YolovKKNet(0, anchors, device, inputwidth)
     # yolov3 = Yolov3().to(self.device)
     print(model)
     flogs.write(str(model)+'\n')
@@ -139,12 +139,18 @@ def trainer():
             state_dict = torch.load(pretrainedmodel, map_location=torch.device('cuda'))
         else:
             state_dict = torch.load(pretrainedmodel, map_location=torch.device('cpu'))
+        if pretrainedmodel.endswith("pt"):
+            param = state_dict['state_dict'].float()
+            param = param.state_dict()
+        else:
+            param = state_dict['state_dict']
         kkk = {}
-        for key, value in state_dict['state_dict'].items():
+        for key, value in param.items():
+            if 'out0' in key or 'out1' in key or 'out2' in key:
+                continue
             kkk[key.replace("module.", "")] = value
-        state_dict['state_dict'] = kkk
-        pretrained = state_dict['state_dict']
-        model.load_state_dict(pretrained, strict = True)
+        pretrained = kkk
+        model.load_state_dict(pretrained, strict = False)
         if not scratch and 'iteration' in state_dict.keys():
             iteration = state_dict['iteration']
             alliters = state_dict['alliters']
@@ -179,21 +185,41 @@ def trainer():
     #     optimizer = optim.Adam(params, lr=learning_rate, betas=(momnetum, 0.999), weight_decay= weight_decay)  # adjust beta1 to momentum
     # else:
     ema = ModelEMA(model)
+    # def freeze_darknet_backbone(model):
+    #     '''https://github.com/qqwweee/keras-yolo3/blob/master/train.py#L50'''
+    #     notfreeze_netlist = ["cv60", "cv61", "cv62", "p", "out0", "out1", "out2"]
+    #     for name, m in model.named_parameters(): #1 
+    #         mar = 999
+    #         for i in notfreeze_netlist:
+    #             if i in name:
+    #                 mar = -999
+    #                 break
+    #         if mar < 0:
+    #             print("train layer params: ", name, list(m.size()))
+    #             m.requires_grad = False
+    #             continue
+    #         else:
+    #             print("freeze layer params: ", name, list(m.size()))
+    
+    # freeze_darknet_backbone(model)
     optimizer = smart_optimizer(model, 'SGD', lr = learning_rate, momentum=momnetum, decay=weight_decay)
-    # optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
+    # k = [i for i in model.parameters() if i.requires_grad()]
+    # kk = [i for i in model.parameters()]
+    # optimizer = optim.SGD([i for i in model.parameters() if i.requires_grad], lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
     # optimizer = optim.SGD(params, lr=learning_rate, momentum=momnetum, nesterov=True, weight_decay= weight_decay)
     # and a learning rate scheduler
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
     #                                                step_size=7,
     #                                                gamma=0.1)
-    nc = 72 #cpu_count()
+    nc = 11 #cpu_count()
+    subsiz = 2
     num_cpu = min([nc//max(torch.cuda.device_count(), 1), 2**3])  #num_cpu if num_cpu < 20 else 13
     dataloader = DataLoader(traindata, batch_size = batch_size//subsiz,shuffle=True, \
-        num_workers=num_cpu, collate_fn=collate_fn, pin_memory=True)
+        num_workers=num_cpu, collate_fn=collate_fnseg_keypoint, pin_memory=True)
     valdata = trainDataset(pth_evaluate, img_evaluate, stride = strides, anchors = anchors, \
                                 augment = False, inputwidth = inputwidth, transform=TFRESIZE)
     valdataloader = DataLoader(valdata, batch_size = batch_size // subsiz, shuffle=False, \
-            num_workers=num_cpu, collate_fn=collate_fn, pin_memory=True)
+            num_workers=num_cpu, collate_fn=collate_fnseg_keypoint, pin_memory=True)
     # validloader = DataLoader(validdata, batch_size=1,shuffle=True, num_workers=1)
     start = time.time()
     print('Using {} device'.format(device))
@@ -202,9 +228,9 @@ def trainer():
     stepiters = 0
     pre_map = 0
 
-    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bce0loss = torch.nn.BCEWithLogitsLoss(reduction='none').to(device)
     bce1loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
-    bce2loss = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
+    bce2loss = torch.nn.BCEWithLogitsLoss(reduction='none').to(device)
     bcecls = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
     bcecof = torch.nn.BCEWithLogitsLoss(reduction='sum').to(device)
     mseloss = [torch.nn.MSELoss(reduction='sum').to(device) for i in range(2*2)]
@@ -231,17 +257,22 @@ def trainer():
         # elif epoch == warmepoch + 1:
         #     optimizer.momentum = momnetum
         preiou = 0
-        for i, (image, labels, imgid) in enumerate(tqdm.tqdm(dataloader, desc=f"Training Epoch {epoch}/{num_epochs}")):
+        for i, (image, labels, gtmask, keypoints, imgid) in enumerate(tqdm.tqdm(dataloader, desc=f"Training Epoch {epoch}/{num_epochs}")):
+            if i==2:
+                break
             stepiters += 1
             # if stepiters < alliters:
             #     continue
-            # cvshow_(image, labels)   #cv2 show inputs images)
+            # cvshow_seg_kpt(image, labels, gtmask, keypoints)   #cv2 show inputs images)
+            # exit(0)
             count += 1
             if epoch <= warmepoch:
                 lr = adjust_lr(optimizer, stepiters, epoch, len(dataloader), num_epochs, batch_size, momnetum, learning_rate)
             
             image = image.to(device)
             labels = labels.to(device)
+            gtmask = gtmask.to(device)
+            keypoints = keypoints.to(device)
             
             # try:
             with torch.cuda.amp.autocast(amp):
@@ -252,26 +283,25 @@ def trainer():
 
                 # loss, c_l, confi_l, iouloss = calculate_losses_yolov3(prediction, labels, model, count_scale)
                 if chooseLoss == "darknetRevise":
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
-                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, confi_kpt, confi_l, iouloss, iounow, cof, ncof, maskloss, kptloss, boxnum = calculate_losses_darknetRevise(prediction, labels, model, ignore_thresh, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
                 elif chooseLoss == "darknet":
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
-                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, confi_kpt, confi_l, iouloss, iounow, cof, ncof, maskloss, kptloss, boxnum = calculate_losses_darknet(prediction, labels, model, ignore_thresh, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
                 elif chooseLoss == "Alexeydarknet":
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, confi_kpt, confi_l, iouloss, iounow, cof, ncof, maskloss, kptloss, boxnum = calculate_losses_Alexeydarknet(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
                 elif chooseLoss == "yolofive":
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
-                        # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
-                        #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, confi_kpt, confi_l, iouloss, iounow, cof, ncof, maskloss, kptloss, boxnum = calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                                                                                            bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
+                        # loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, maskloss, kptloss, boxnum = calculate_losses_yolofive_original(prediction, labels, model, ignore_thresh, iou_thresh, count_scale, \
+                        #                                                                     bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
                 elif chooseLoss == "20230730":
-                    loss, c_l, confi_l, iouloss, iounow, cof, ncof, cla, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
-                                                                                        bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss)
+                    loss, confi_kpt, confi_l, iouloss, iounow, cof, ncof, maskloss, kptloss, boxnum = calculate_losses_20230730(prediction, labels, model, count_scale, ignore_thresh, \
+                                                                                        bce0loss, bce1loss, bce2loss, bcecls, bcecof, mseloss, gtmask, keypoints)
 
                 # if darknetLoss and i > 30 and iouloss > 10 and iouloss / preiou > 3:
                 #     loss = c_l + confi_l
-
                 if amp:
                     scaler.scale(loss).backward()
                 else:
@@ -293,13 +323,14 @@ def trainer():
     #                                    epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], float(mse.item()),\
     #                                     float(c_l.item()), float(confi_l.item()), iouloss.item(), loss, epoch_loss)
                 logword = '''\ne: {}, r:{:.2f}%, i: {}, ai: {}, lr: {:.6f}, Class: {:.3f}, \
-    Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: {:.3f}, ncof: {:.6f}, cla: {:.3f}'''.format(
+    Confi: {:.3f}, iou: {:.3f}, Loss: {:.3f}, avgloss: {:.3f}, iounow: {:.3f}, cof: {:.3f}, ncof: {:.6f}, mask: {:.3f}, kpt: {:.3f}'''.format(
                                     epoch, i*100/length, i+1, stepiters, optimizer.state_dict()['param_groups'][0]['lr'], \
-                                        float(c_l.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
-                                            epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), cla.item())
+                                        float(confi_kpt.item()/boxnum), float(confi_l.item()/boxnum), iouloss.item()/boxnum, loss/boxnum, \
+                                            epoch_loss/boxnum, iounow.item(), cof.item(), ncof.item(), maskloss.item(), kptloss.item())
                 if i%subsiz==0 or i == len(dataloader)-1:
                     if amp:
                         scaler.unscale_(optimizer)  # unscale gradients
+                    # https://jamesmccaffrey.wordpress.com/2022/10/17/the-difference-between-pytorch-clip_grad_value_-and-clip_grad_norm_-functions/
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
                     if amp:
                         scaler.step(optimizer)  # optimizer.step
@@ -341,7 +372,7 @@ def trainer():
                      'alliters':stepiters,\
                      'nowepoch':epoch}
         # scheduler.step(np.mean(losscol))
-        [map, mAP0], lengthkk = validation_map(model if ema==None else ema.ema, yolovfive, valdataloader, device)
+        [map, mAP0], lengthkk = validation_map_segkeypoint(model if ema==None else ema.ema, yolovfive, valdataloader, device)
         lengthkk = 2000*2+1000
         # map = evaluation("", model=model, dataloader=valdataloader, score_thresh_now = 0.001, nms_thresh_now = 0.6)
         print("validation......num_img: {}, mAP: {}, premap:{}".format(lengthkk, [map, mAP0], pre_map))
