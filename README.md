@@ -53,7 +53,7 @@ the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch
 
 **the training result with yolov5s, 7 epoch mAP 16%,  10 epoch 21.2% in val2017, train from scratch without pretrained model and without data augmentation** 
 
-**the segmentation model is much better.  it bbox **mAP** can reach to 50%**    
+**the segmentation model is much better.  it bbox **mAP** can reach to 33%**    
 
 model_e46seg_map[0.50716__0.334552]_lnan_2023-09-01.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
 
@@ -107,7 +107,7 @@ python allcodes/train_yolovkkn_seg_distribute.py
 python allcodes/predict_yolovkkn_seg.py
 ```
 **Model**
-it bbox **mAP** can reach to 50%    model_e46seg_map[0.50716__0.334552]_lnan_2023-09-01.pt
+it bbox **mAP** can reach to 33%    model_e46seg_map[0.50716__0.334552]_lnan_2023-09-01.pt
 
 model_e60seg_map[0.485051__0.295817]_lnan_2023-09-03.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
 
