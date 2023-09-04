@@ -53,7 +53,11 @@ the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch
 
 **the training result with yolov5s, 7 epoch mAP 16%,  10 epoch 21.2% in val2017, train from scratch without pretrained model and without data augmentation** 
 
-<img src='.\images\0 .jpg' width = 100%/>
+**the segmentation model is much better.  it bbox **mAP** can reach to 50%**    
+
+model_e46seg_map[0.50716__0.334552]_lnan_2023-09-01.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
+
+<img src='.\images\0.jpg' width = 100%/>
 <img src='.\images\1.jpg' width = 100%/>
 <img src='.\images\-1.jpg' width = 100%/>
 <img src='.\images\2.jpg' width = 100%/>
@@ -103,6 +107,8 @@ python allcodes/train_yolovkkn_seg_distribute.py
 python allcodes/predict_yolovkkn_seg.py
 ```
 **Model**
+it bbox **mAP** can reach to 50%    model_e46seg_map[0.50716__0.334552]_lnan_2023-09-01.pt
+
 model_e60seg_map[0.485051__0.295817]_lnan_2023-09-03.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
 
 **Result**
@@ -116,6 +122,8 @@ model_e60seg_map[0.485051__0.295817]_lnan_2023-09-03.pt [https://www.aliyundrive
 
 # Model Segment＋Pose Keypoint  Person
 
+the pose keypoint detection and segmentation in a model.
+
 **Train**
 ```
 python allcodes/train_yolovkkn_seg_keypoint.py
@@ -127,6 +135,8 @@ python allcodes/train_yolovkkn_seg_keypoint_distribute.py
 python allcodes/predict_yolovkkn_seg_keypoint.py
 ```
 **Model**
+it bbox **mAP** can reach to 50%
+
 model_e39segkpt_map[0.502372__0.006359]_l155.764_2023-09-03.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
 
 **Result**
