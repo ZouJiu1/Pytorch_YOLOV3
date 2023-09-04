@@ -1954,7 +1954,7 @@ def calculate_losses_yolofive(prediction, labels, model, ignore_thresh, iou_thre
     confi_l *= hypobj
     c_l *= hypcls
     iouloss *= hypbox
-    maskloss *= hypbox / batchsize
+    maskloss *= hypbox
     # confi_l *= 1.0
     # c_l *= 0.6
     # iouloss *= 0.06

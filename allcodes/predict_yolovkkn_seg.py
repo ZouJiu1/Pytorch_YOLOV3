@@ -31,10 +31,10 @@ def predict_batch():
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/datas/val.txt'
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
     imgpath = r"C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\train.txt"
-    savepath = r'/root/project/Pytorch_YOLOV3/datas/imshowseg'
+    savepath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\imshowseg'
     os.makedirs(savepath, exist_ok = True)
     # pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\yolovkkn\2023-08-16yolokkn\model_e51_map[0.48195__0.256185]_l64988.657_2023-08-16.pth'
-    pretrainedmodel = r'/root/project/yolovkkn/2023-09-01yolokkn/model_e46_map[0.50716__0.334552]_lnan_2023-09-01.pt'
+    pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\20230903\model_e60seg_map[0.485051__0.295817]_lnan_2023-09-03.pt'
     # imgpath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\datas\valid\valid.txt'
     # savepath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\images\730\valid'
     for i in os.listdir(savepath):
@@ -73,7 +73,7 @@ def predict_batch():
 
     # inpth = r'F:\val201seven'
     # inpth = r'C:\Users\10696\Desktop\kkk'
-    inpth = r'/root/autodl-tmp/tmp/val2017'
+    inpth = r'F:\val201seven'
     lis = [os.path.join(inpth, i) for i in os.listdir(inpth)]
 
     np.random.seed(999)

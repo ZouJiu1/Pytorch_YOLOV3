@@ -7,19 +7,21 @@ I used the **torch.mean** to calculate the loss of non_confidence before, so it 
 
 but the training codes and model is correct.
 
-##### pretrained model
+# Detection model
 
 [model_e30_map https://www.aliyundrive.com/s/xVYNAiaa19c 提取码: 16bn](https://www.aliyundrive.com/s/xVYNAiaa19c)
 
 [model_e51_map https://www.aliyundrive.com/s/F7wRTcitbkB 提取码: gn85](https://www.aliyundrive.com/s/F7wRTcitbkB)
 
+**Train**
 ```
 python allcodes/train_yolovkkn.py
 python allcodes/train_yolovkkn_distribute.py
 ```
 
+**Predict**
 ```
-python predict_yolovkkn.py
+python allcodes/predict_yolovkkn.py
 ```
 
 ##### Things different
@@ -51,7 +53,7 @@ the training result with yolov3-tiny alexeydarknet, 70 epoch, train from scratch
 
 **the training result with yolov5s, 7 epoch mAP 16%,  10 epoch 21.2% in val2017, train from scratch without pretrained model and without data augmentation** 
 
-<img src='.\images\0.jpg' width = 100%/>
+<img src='.\images\0 .jpg' width = 100%/>
 <img src='.\images\1.jpg' width = 100%/>
 <img src='.\images\-1.jpg' width = 100%/>
 <img src='.\images\2.jpg' width = 100%/>
@@ -77,7 +79,8 @@ the tracking result is here: waiting for minutes
 <img src="./gif.gif" width = "100%" />
 <img src="./gifman.gif" width = "100%" />
 
-###### run command
+### run command
+**Tracking**
 ```
 python tracking/tracking.py
 ```
@@ -87,8 +90,64 @@ python tracking/tracking.py
 
 [MOT16-06-raw.webm https://www.aliyundrive.com/s/tUwZH1H5gET       提取码: p50u](https://www.aliyundrive.com/s/tUwZH1H5gET)
 
+# Model Segment
+
+**Train**
+```
+python allcodes/train_yolovkkn_seg.py
+python allcodes/train_yolovkkn_seg_distribute.py
+```
+
+**Predict**
+```
+python allcodes/predict_yolovkkn_seg.py
+```
+**Model**
+model_e60seg_map[0.485051__0.295817]_lnan_2023-09-03.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
+
+**Result**
+<img src='.\images\segshow\000000004495.jpg' width = 33%/><img src='.\images\segshow\000000025424.jpg' width = 33%/><img src='.\images\segshow\000000033114.jpg' width = 33%/><br>
+<img src='.\images\segshow\000000089556.jpg' width = 33%/><img src='.\images\segshow\000000112798.jpg' width = 33%/><img src='.\images\segshow\000000122962.jpg' width = 33%/><br>
+<img src='.\images\segshow\000000133567.jpg' width = 33%/><img src='.\images\segshow\000000181542.jpg' width = 33%/><img src='.\images\segshow\000000205282.jpg' width = 33%/><br>
+<img src='.\images\segshow\000000228436.jpg' width = 33%/><img src='.\images\segshow\000000268375.jpg' width = 33%/><img src='.\images\segshow\000000270908.jpg' width = 33%/><br>
+<img src='.\images\segshow\000000297147.jpg' width = 33%/><img src='.\images\segshow\000000344816.jpg' width = 33%/><img src='.\images\segshow\000000385719.jpg' width = 33%/><br>
+<img src='.\images\segshow\000000504635.jpg' width = 33%/><img src='.\images\segshow\000000546829.jpg' width = 33%/><img src='.\images\segshow\000000568213.jpg' width = 33%/><br>
+
+
+# Model Segment＋Pose Keypoint  Person
+
+**Train**
+```
+python allcodes/train_yolovkkn_seg_keypoint.py
+python allcodes/train_yolovkkn_seg_keypoint_distribute.py
+```
+
+**Predict**
+```
+python allcodes/predict_yolovkkn_seg_keypoint.py
+```
+**Model**
+model_e39segkpt_map[0.502372__0.006359]_l155.764_2023-09-03.pt [https://www.aliyundrive.com/s/bLnC733gX5C 提取 nu63  ](https://www.aliyundrive.com/s/bLnC733gX5C)   
+
+**Result**
+
+the result including segment and person pose keypoint
+
+<img src='.\images\keypoint_seg\000000001000.jpg' width = 33%/><img src='.\images\keypoint_seg\000000031093.jpg' width = 33%/><img src='.\images\keypoint_seg\000000041990.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000052591.jpg' width = 33%/><img src='.\images\keypoint_seg\000000060347.jpg' width = 33%/><img src='.\images\keypoint_seg\000000072281.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000086956.jpg' width = 33%/><img src='.\images\keypoint_seg\000000091500.jpg' width = 33%/><img src='.\images\keypoint_seg\000000118921.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000172877.jpg' width = 33%/><img src='.\images\keypoint_seg\000000173830.jpg' width = 33%/><img src='.\images\keypoint_seg\000000181542.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000186449.jpg' width = 33%/><img src='.\images\keypoint_seg\000000257478.jpg' width = 33%/><img src='.\images\keypoint_seg\000000274411.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000295478.jpg' width = 33%/><img src='.\images\keypoint_seg\000000302536.jpg' width = 33%/><img src='.\images\keypoint_seg\000000309964.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000345466.jpg' width = 33%/><img src='.\images\keypoint_seg\000000357737.jpg' width = 33%/><img src='.\images\keypoint_seg\000000391722.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000398028.jpg' width = 33%/><img src='.\images\keypoint_seg\000000410496.jpg' width = 33%/><img src='.\images\keypoint_seg\000000412362.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000463174.jpg' width = 33%/><img src='.\images\keypoint_seg\000000470173.jpg' width = 33%/><img src='.\images\keypoint_seg\000000477288.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000498807.jpg' width = 33%/><img src='.\images\keypoint_seg\000000500478.jpg' width = 33%/><img src='.\images\keypoint_seg\000000515579.jpg' width = 33%/><br>
+<img src='.\images\keypoint_seg\000000517056.jpg' width = 33%/><img src='.\images\keypoint_seg\000000554579.jpg' width = 33%/><img src='.\images\keypoint_seg\000000574823.jpg' width = 33%/><br>
 -------------------------------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------------
 ### upgrade version 6 2022-11-13 
 

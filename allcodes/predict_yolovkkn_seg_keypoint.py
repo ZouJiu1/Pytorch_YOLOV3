@@ -31,10 +31,10 @@ def predict_batch():
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/datas/val.txt'
     # imgpath = r'/home/featurize/work/Pytorch_YOLOV3/2023/PyTorch-YOLOv3-master/data/person/personcartrain.txt'
     imgpath = r"C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\train.txt"
-    savepath = r'/root/project/Pytorch_YOLOV3/datas/imshowkpt'
+    savepath = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\datas\imshowsegkpt'
     os.makedirs(savepath, exist_ok = True)
     # pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\yolovkkn\2023-08-16yolokkn\model_e51_map[0.48195__0.256185]_l64988.657_2023-08-16.pth'
-    pretrainedmodel = r'/root/project/yolovkkn/2023-09-03yolokkn/model_e3_map[0.336377__0.004258]_l482.236_2023-09-03.pt'
+    pretrainedmodel = r'C:\Users\10696\Desktop\Pytorch_YOLOV3\log\20230903\model_e39segkpt_map[0.502372__0.006359]_l155.764_2023-09-03.pt'
     # imgpath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\datas\valid\valid.txt'
     # savepath = r'C:\Users\ZouJiu\Desktop\PAT\Pytorch_YOLOV3\images\730\valid'
     device = 'cpu'
@@ -75,14 +75,14 @@ def predict_batch():
 
     # inpth = r'F:\val201seven'
     # inpth = r'C:\Users\10696\Desktop\kkk'
-    inpth = r'/root/autodl-tmp/val2017'
+    inpth = r'F:\val201seven'
     lis = [os.path.join(inpth, i) for i in os.listdir(inpth)]
 
     np.random.seed(999)
     np.random.shuffle(lis)
     model.to(device)
     model.eval()
-    score_thresh = 0.6
+    score_thresh = 0.36
     nms_thresh = 0.6 - 0.2 - 0.1
     # np.random.shuffle(lis)
     colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [30, 128, 255], [255, 128, 30], [102, 178, 255], [51, 153, 255],[255, 153, 153], [255, 102, 102], \
